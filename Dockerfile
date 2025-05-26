@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY ticket_checker.py .
 COPY railway-start.py .
-# COPY heroku-start.py .
+COPY heroku-start.py .
 
 # Create directory for logs
 RUN mkdir -p /app/logs
