@@ -1,0 +1,54 @@
+{
+    "name": "Sportstiming Ticket Checker",
+    "description": "Automatically monitors sportstiming.dk for ticket availability and sends notifications",
+    "repository": "https://github.com/yourusername/sportstiming-checker",
+    "logo": "https://cdn-icons-png.flaticon.com/512/2936/2936760.png",
+    "keywords": [
+        "tickets",
+        "monitoring",
+        "telegram",
+        "sportstiming"
+    ],
+    "stack": "heroku-20",
+    "env": {
+        "TELEGRAM_BOT_TOKEN": {
+            "description": "Your Telegram bot token from @BotFather",
+            "required": true
+        },
+        "TELEGRAM_CHAT_ID": {
+            "description": "Your Telegram chat ID (can be comma-separated for multiple recipients)",
+            "required": true
+        },
+        "CHECK_INTERVAL": {
+            "description": "How often to check for tickets (in seconds)",
+            "value": "300",
+            "required": false
+        },
+        "TICKET_URL": {
+            "description": "URL to monitor for tickets",
+            "value": "https://www.sportstiming.dk/event/6583/resale",
+            "required": false
+        },
+        "NOTIFY_ALL": {
+            "description": "Send notifications for all checks (true) or only when tickets are found (false)",
+            "value": "true",
+            "required": false
+        },
+        "TZ": {
+            "description": "Timezone for the application",
+            "value": "Europe/Copenhagen",
+            "required": false
+        }
+    },
+    "formation": {
+        "worker": {
+            "quantity": 1,
+            "size": "eco"
+        }
+    },
+    "buildpacks": [
+        {
+            "url": "heroku/python"
+        }
+    ]
+}

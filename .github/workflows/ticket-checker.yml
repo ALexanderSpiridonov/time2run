@@ -1,0 +1,47 @@
+name: Ticket Checker
+
+on:
+  schedule:
+    # Run every 1 minute
+    - cron: '*/1 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  check-tickets:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Create config from secrets
+      run: |
+        cat > config.json << EOF
+        {
+          "telegram": {
+            "bot_token": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
+            "chat_id": "${{ secrets.TELEGRAM_CHAT_ID }}"
+          }
+        }
+        EOF
+        
+    - name: Run ticket check
+      run: |
+        python ticket_checker.py --single --notify-all --config config.json
+        
+    - name: Upload logs
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: ticket-checker-logs
+        path: ticket_checker.log 

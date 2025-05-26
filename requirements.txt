@@ -1,0 +1,14 @@
+requests>=2.25.1
+beautifulsoup4>=4.9.3
+twilio>=7.0.0
+lxml>=4.6.3
+
+# Optional dependencies for notifications
+# Uncomment the ones you need:
+
+# For SMS notifications via Twilio
+# twilio>=8.2.0
+
+# For Telegram notifications (uses requests, already included)
+
+# For Pushover notifications (uses requests, already included) 

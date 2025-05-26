@@ -1,0 +1,9 @@
+services:
+  - type: worker
+    name: sportstiming-ticket-checker
+    env: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: TZ
+        value: Europe/Copenhagen
+    startCommand: python ticket_checker.py --config config.json --notify-all --interval 300 

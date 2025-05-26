@@ -1,0 +1,24 @@
+{
+  "email": {
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "username": "your_email@gmail.com",
+    "password": "your_app_password",
+    "from_email": "your_email@gmail.com",
+    "to_email": "notification_recipient@gmail.com"
+  },
+  "sms": {
+    "account_sid": "your_twilio_account_sid",
+    "auth_token": "your_twilio_auth_token",
+    "from_number": "+1234567890",
+    "to_number": "+1987654321"
+  },
+  "telegram": {
+    "bot_token": "your_bot_token_from_botfather",
+    "chat_id": "your_chat_id_or_channel_id"
+  },
+  "pushover": {
+    "app_token": "your_pushover_app_token",
+    "user_key": "your_pushover_user_key"
+  }
+}
