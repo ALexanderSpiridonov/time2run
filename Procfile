@@ -1,1 +1,1 @@
-worker: python heroku-start.py
+worker: python railway-start.py
