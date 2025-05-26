@@ -72,18 +72,24 @@ class SportstimingTicketChecker:
 
             soup = BeautifulSoup(response.content, "html.parser")
 
-            # Look for the "no tickets available" message in Danish
+            # Look for the specific "sold out/reserved" message in Danish
+            sold_out_message = "Det er p.t. ikke muligt at foretage dette valg, da alt enten er solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
+
+            # Also check for the general "no tickets" message
             no_tickets_text = "Der findes ingen billetter til salg"
-            tickets_available_text = "Billetter til salg"
 
             page_text = soup.get_text()
 
-            # Check if there are tickets available
-            if no_tickets_text in page_text:
+            # Check if tickets are sold out/reserved
+            if sold_out_message in page_text:
+                status = "NO_TICKETS"
+                message = "All tickets are sold or reserved"
+            elif no_tickets_text in page_text:
                 status = "NO_TICKETS"
                 message = "No tickets available for sale"
             else:
-                # Look for ticket listings or sale sections
+                # If neither "sold out" message is present, tickets might be available
+                # Look for ticket listings or sale sections to confirm
                 ticket_sections = soup.find_all(
                     ["div", "section"],
                     text=lambda text: text and "billet" in text.lower(),
@@ -97,10 +103,12 @@ class SportstimingTicketChecker:
 
                 if ticket_sections or price_indicators:
                     status = "TICKETS_AVAILABLE"
-                    message = "Tickets may be available! Manual check recommended."
+                    message = "🎫 Tickets are available! Check the website now!"
                 else:
-                    status = "UNKNOWN"
-                    message = "Could not determine ticket availability"
+                    status = "TICKETS_AVAILABLE"
+                    message = (
+                        "🎫 No 'sold out' message found - tickets may be available!"
+                    )
 
             # Count any visible ticket listings
             ticket_count = self.count_ticket_listings(soup)
