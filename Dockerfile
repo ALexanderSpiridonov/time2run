@@ -15,7 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY ticket_checker.py .
 COPY railway-start.py .
-COPY heroku-start.py .
+
+# Create a copy of railway-start.py as heroku-start.py in case Railway looks for it
+RUN cp railway-start.py heroku-start.py
 
 # Create directory for logs
 RUN mkdir -p /app/logs
@@ -29,4 +31,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('https://httpbin.org/status/200', timeout=5)" || exit 1
 
 # Default command uses railway-start.py which creates config from env vars
+# If Railway tries to run heroku-start.py, it will now work since we copied it
 CMD ["python", "railway-start.py"] 
