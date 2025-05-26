@@ -34,7 +34,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 ENV TELEGRAM_BOT_TOKEN="7921364566:AAH-vmfxZtfqPK3YjGX6A9h4cvsuaD0pcFo"
 ENV TELEGRAM_CHAT_ID="76016759,1609281"
 ENV CHECK_INTERVAL="30"
-ENV NOTIFY_ALL="true"
+ENV NOTIFY_ALL="false"
 
 # Default command uses railway-start.py which creates config from env vars
 # If Railway tries to run heroku-start.py, it will now work since we copied it
