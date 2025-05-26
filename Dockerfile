@@ -30,6 +30,12 @@ USER ticketuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('https://httpbin.org/status/200', timeout=5)" || exit 1
 
+# Set environment variables (backup method)
+ENV TELEGRAM_BOT_TOKEN="7921364566:AAH-vmfxZtfqPK3YjGX6A9h4cvsuaD0pcFo"
+ENV TELEGRAM_CHAT_ID="76016759,1609281"
+ENV CHECK_INTERVAL="300"
+ENV NOTIFY_ALL="true"
+
 # Default command uses railway-start.py which creates config from env vars
 # If Railway tries to run heroku-start.py, it will now work since we copied it
 CMD ["python", "railway-start.py"] 
