@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY ticket_checker.py .
-COPY config.json .
+COPY railway-start.py .
 
 # Create directory for logs
 RUN mkdir -p /app/logs
@@ -27,5 +27,5 @@ USER ticketuser
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import requests; requests.get('https://httpbin.org/status/200', timeout=5)" || exit 1
 
-# Default command (can be overridden)
-CMD ["python", "ticket_checker.py", "--config", "config.json", "--notify-all"] 
+# Default command uses railway-start.py which creates config from env vars
+CMD ["python", "railway-start.py"] 
