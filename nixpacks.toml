@@ -11,7 +11,7 @@ cmd = 'python railway-start.py'
 PORT = '8080'
 TELEGRAM_BOT_TOKEN = "7921364566:AAH-vmfxZtfqPK3YjGX6A9h4cvsuaD0pcFo"
 TELEGRAM_CHAT_ID = "76016759,1609281"
-CHECK_INTERVAL = "30"
+CHECK_INTERVAL = "1"
 NOTIFY_ALL = "false"
 
 # Fallback - uncomment and set your values if Railway variables don't work
