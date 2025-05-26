@@ -83,11 +83,15 @@ class SportstimingTicketChecker:
 
             page_text = soup.get_text()
 
-            # Check if tickets are sold out/reserved
-            if sold_out_message in page_text:
-                status = "NO_TICKETS"
-                message = "All tickets are sold or reserved"
-            elif no_tickets_text in page_text:
+            # # Check if tickets are sold out/reserved
+            # if sold_out_message in page_text:
+            #     status = "NO_TICKETS"
+            #     message = "All tickets are sold or reserved"
+            # elif no_tickets_text in page_text:
+            #     status = "NO_TICKETS"
+            #     message = "No tickets available for sale"
+
+            if no_tickets_text in page_text:
                 status = "NO_TICKETS"
                 message = "No tickets available for sale"
             else:
