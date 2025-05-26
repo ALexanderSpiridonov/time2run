@@ -602,8 +602,6 @@ Time: {result['timestamp'][:19]}"""
             while True:
                 result = self.run_single_check()
 
-                print(result)
-
                 # Send notifications based on configuration
                 if self.notify_all_statuses:
                     # Send notification for every check
