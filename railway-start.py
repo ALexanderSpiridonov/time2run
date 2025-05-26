@@ -8,6 +8,7 @@ import os
 import json
 import sys
 import subprocess
+import time
 
 
 def create_config_from_env():
@@ -53,12 +54,35 @@ def create_config_from_env():
 def main():
     print("🚂 Starting Sportstiming Ticket Checker on Railway...")
 
+    # Debug: Print environment variables
+    print("🔍 Debug - Environment variables:")
+    print(
+        f"   TELEGRAM_BOT_TOKEN: {'SET' if os.getenv('TELEGRAM_BOT_TOKEN') else 'NOT SET'}"
+    )
+    print(
+        f"   TELEGRAM_CHAT_ID: {'SET' if os.getenv('TELEGRAM_CHAT_ID') else 'NOT SET'}"
+    )
+    print(f"   CHECK_INTERVAL: {os.getenv('CHECK_INTERVAL', 'NOT SET')}")
+    print(f"   NOTIFY_ALL: {os.getenv('NOTIFY_ALL', 'NOT SET')}")
+
+    # Show first few characters of bot token if set (for debugging)
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if bot_token:
+        print(f"   Bot token starts with: {bot_token[:10]}...")
+
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if chat_id:
+        print(f"   Chat ID: {chat_id}")
+
     # Create config from environment variables
     config = create_config_from_env()
 
     if not config:
         print("❌ No notification configuration found in environment variables")
         print("Please set at least TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID")
+        print("💡 Check Railway dashboard → Variables tab")
+        print("⏳ Waiting 30 seconds before exit to prevent restart loop...")
+        time.sleep(30)
         sys.exit(1)
 
     # Write config file
