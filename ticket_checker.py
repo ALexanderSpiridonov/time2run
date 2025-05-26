@@ -73,7 +73,7 @@ class SportstimingTicketChecker:
             soup = BeautifulSoup(response.content, "html.parser")
 
             # Look for the specific "sold out/reserved" message in Danish
-            sold_out_message = "Det er p.t. ikke muligt at foretage dette valg, da alt enten er solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
+            sold_out_message = "solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
 
             # Also check for the general "no tickets" message
             no_tickets_text = "Der findes ingen billetter til salg"
