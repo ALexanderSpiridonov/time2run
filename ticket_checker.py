@@ -15,6 +15,7 @@ from email.mime.multipart import MIMEMultipart
 import argparse
 import json
 import os
+import sys
 
 
 class SportstimingTicketChecker:
@@ -42,7 +43,9 @@ class SportstimingTicketChecker:
             format="%(asctime)s - %(levelname)s - %(message)s",
             handlers=[
                 logging.FileHandler("ticket_checker.log"),
-                logging.StreamHandler(),
+                logging.StreamHandler(
+                    sys.stdout
+                ),  # Use stdout so Railway doesn't treat INFO as errors
             ],
         )
         self.logger = logging.getLogger(__name__)
