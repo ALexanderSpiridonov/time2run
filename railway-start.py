@@ -117,8 +117,8 @@ def main():
 
     # Get configuration from environment
     check_interval = int(
-        os.getenv("CHECK_INTERVAL", "60")
-    )  # Default 2 minutes for faster checking
+        os.getenv("CHECK_INTERVAL", "120")
+    )  # Default 2 minutes for checking 50+ tickets
     ticket_url = os.getenv(
         "TICKET_URL", "https://www.sportstiming.dk/event/6583/resale"
     )
@@ -131,9 +131,10 @@ def main():
     if ticket_range:
         print(f"   Ticket Range: {ticket_range}")
     else:
-        print(f"   Ticket Range: 54296-54310 (default)")
+        print(f"   Ticket Range: 54310-54360 (default)")
     print(f"   Interval: {check_interval} seconds")
     print(f"   Notify all statuses: {notify_all}")
+    print(f"   Mode: CONTINUOUS MONITORING (not single check)")
 
     # Build command
     cmd = [
@@ -153,7 +154,13 @@ def main():
     if notify_all:
         cmd.append("--notify-all")
 
+    # Explicitly ensure we're NOT in single mode (continuous is default)
     print(f"🏃 Starting application with command: {' '.join(cmd)}")
+    print(
+        "🔄 This will run CONTINUOUSLY, checking every {} seconds".format(
+            check_interval
+        )
+    )
 
     # Start the application
     os.execvp("python", cmd)

@@ -15,6 +15,172 @@ This bot automatically monitors the Sportstiming.dk resale page for available ti
 - ✅ Single check mode for testing
 - ✅ Danish language support (detects "Der findes ingen billetter til salg")
 
+## ✨ New Features
+
+- **🎯 Individual Ticket Checking**: Checks specific ticket IDs (54310-54360) instead of just the main page
+- **⚡ Immediate Notifications**: Sends alerts instantly when any ticket becomes available
+- **🔗 Direct Links**: Provides direct purchase links for each available ticket
+- **🚀 Smart Detection**: Detects sold, reserved, expired, and available tickets accurately
+
+## 🚀 Quick Railway Deployment
+
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/VvbG8J?referralCode=ticket-checker)
+
+### 1. Set Environment Variables
+
+In your Railway dashboard, go to **Variables** and set:
+
+**Required:**
+```
+TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
+TELEGRAM_CHAT_ID=your_chat_id
+```
+
+**Optional:**
+```
+CHECK_INTERVAL=120                    # Check every 2 minutes (default)
+TICKET_RANGE=54310-54360             # Ticket ID range to check (default: 54310-54360)
+NOTIFY_ALL=false                     # Only notify when tickets are available (default)
+```
+
+### 2. Get Telegram Bot Token
+
+1. Message [@BotFather](https://t.me/botfather) on Telegram
+2. Send `/newbot` and follow instructions
+3. Copy the token (looks like `123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11`)
+
+### 3. Get Chat ID
+
+**Option A - Individual Chat:**
+1. Send a message to your bot
+2. Visit: `https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates`
+3. Look for `"chat":{"id":CHAT_ID_HERE}`
+
+**Option B - Group Chat (Recommended for multiple people):**
+1. Create a Telegram group
+2. Add your bot to the group (`/invite @your_bot_name`)
+3. Send a message in the group mentioning the bot
+4. Use the same URL above to find the group chat ID (usually negative number)
+5. For multiple chats: `TELEGRAM_CHAT_ID=chat1,chat2,chat3`
+
+## 📱 How It Works
+
+The bot now monitors **individual ticket URLs** instead of the main page:
+
+1. **Checks tickets 54310-54360** (customizable via `TICKET_RANGE`)
+2. **Sends immediate alerts** when any ticket becomes available
+3. **Provides direct links** like: `https://www.sportstiming.dk/event/6583/resale/ticket/54302`
+4. **Continues scanning** after finding tickets (doesn't stop at first available ticket)
+
+## 🔔 Notification Example
+
+When ticket 54302 becomes available, you'll receive:
+
+```
+🎫 Sportstiming Ticket Alert
+
+Status: TICKETS_AVAILABLE
+Message: 🎫 URGENT: Ticket 54302 is AVAILABLE NOW!
+
+Available Tickets:
+🎫 Ticket 54302 (https://www.sportstiming.dk/event/6583/resale/ticket/54302)
+
+Check Main Page (https://www.sportstiming.dk/event/6583/resale)
+```
+
+## ⚙️ Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `TELEGRAM_BOT_TOKEN` | ✅ | - | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | ✅ | - | Your chat ID or comma-separated list |
+| `CHECK_INTERVAL` | ❌ | 120 | Seconds between checks |
+| `TICKET_RANGE` | ❌ | 54310-54360 | Range of ticket IDs to check |
+| `NOTIFY_ALL` | ❌ | false | Notify for all status changes |
+
+### Optional Notification Methods
+
+**Email:**
+```
+EMAIL_SMTP_SERVER=smtp.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_USERNAME=your_email@gmail.com
+EMAIL_PASSWORD=your_app_password
+EMAIL_TO=recipient@gmail.com
+```
+
+**SMS (Twilio):**
+```
+TWILIO_ACCOUNT_SID=your_account_sid
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_FROM_NUMBER=+1234567890
+TWILIO_TO_NUMBER=+1987654321
+```
+
+**Pushover:**
+```
+PUSHOVER_APP_TOKEN=your_app_token
+PUSHOVER_USER_KEY=your_user_key
+```
+
+## 🔧 Local Development
+
+```bash
+# Clone repository
+git clone <repository-url>
+cd time2run
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Check single ticket
+python ticket_checker.py --check-ticket 54302 --single
+
+# Check ticket range
+python ticket_checker.py --ticket-range 54310-54360 --single
+
+# Start monitoring with notifications
+python ticket_checker.py --config config.json --interval 120
+```
+
+## 🎯 Usage Examples
+
+```bash
+# Monitor default range (54310-54360) every 2 minutes
+python ticket_checker.py --interval 120
+
+# Monitor custom range
+python ticket_checker.py --ticket-range 54300-54320 --interval 60
+
+# Check single ticket
+python ticket_checker.py --check-ticket 54302 --single
+
+# Debug ticket content
+python ticket_checker.py --debug-ticket 54302
+```
+
+## 🚨 Important Notes
+
+- **Immediate Alerts**: Notifications are sent as soon as ANY ticket is found available
+- **Multiple Tickets**: If multiple tickets are available, you'll get separate alerts for each
+- **Rate Limiting**: Built-in delays between requests to be respectful to the website
+- **Smart Detection**: Automatically handles expired, sold, and invalid tickets
+
+## 📊 Monitoring
+
+The bot logs all activity and you can monitor it in Railway's dashboard under **Logs**.
+
+Successful deployment will show:
+```
+🚂 Starting Sportstiming Ticket Checker on Railway...
+✅ Config file created from environment variables
+🎯 Starting monitoring:
+   Ticket Range: 54310-54360 (default)
+   Interval: 120 seconds
+   Notify all statuses: false
+🏃 Starting application...
+```
+
 ## Installation
 
 1. **Install Python dependencies:**

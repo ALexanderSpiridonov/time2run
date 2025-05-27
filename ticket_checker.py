@@ -201,9 +201,9 @@ class SportstimingTicketChecker:
             dict: Summary of results for all checked tickets
         """
         if not self.ticket_id_range:
-            self.ticket_id_range = (54306, 54336)
+            self.ticket_id_range = (54310, 54360)
             self.logger.info(
-                "No ticket range specified, using default range: 54306-54336"
+                "No ticket range specified, using default range: 54310-54360"
             )
 
         start_id, end_id = self.ticket_id_range
@@ -811,11 +811,11 @@ Time: {result['timestamp'][:19]}"""
 
     def run_single_check(self):
         """Run a single check and return the result"""
-        # If no ticket range specified, use the default range 54306-54336
+        # If no ticket range specified, use the default range 54310-54360
         if not self.ticket_id_range:
-            self.ticket_id_range = (54306, 54336)
+            self.ticket_id_range = (54310, 54360)
             self.logger.info(
-                "No ticket range specified, using default range: 54306-54336"
+                "No ticket range specified, using default range: 54310-54360"
             )
 
         if self.ticket_id_range:
@@ -863,7 +863,7 @@ Time: {result['timestamp'][:19]}"""
                 f"Monitoring ticket range: {self.ticket_id_range[0]}-{self.ticket_id_range[1]}"
             )
         else:
-            self.logger.info("Will use default ticket range: 54306-54336")
+            self.logger.info("Will use default ticket range: 54310-54360")
 
         if self.notify_all_statuses:
             self.logger.info("📢 Notifications enabled for ALL statuses")
