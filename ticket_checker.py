@@ -16,11 +16,17 @@ import argparse
 import json
 import os
 import sys
+import random
 
 
 class SportstimingTicketChecker:
     def __init__(
-        self, event_url, check_interval=300, config_file=None, notify_all_statuses=False
+        self,
+        event_url,
+        check_interval=300,
+        config_file=None,
+        notify_all_statuses=False,
+        ticket_id_range=None,
     ):
         """
         Initialize the ticket checker
@@ -30,12 +36,14 @@ class SportstimingTicketChecker:
             check_interval (int): Time between checks in seconds (default: 5 minutes)
             config_file (str): Path to config file for notifications
             notify_all_statuses (bool): Send notifications for all statuses, not just when tickets are available
+            ticket_id_range (tuple): Tuple of (start_id, end_id) for checking specific ticket IDs
         """
         self.event_url = event_url
         self.check_interval = check_interval
         self.config_file = config_file
         self.config = self.load_config() if config_file else {}
         self.notify_all_statuses = notify_all_statuses
+        self.ticket_id_range = ticket_id_range
 
         # Set up logging
         logging.basicConfig(
@@ -67,6 +75,197 @@ class SportstimingTicketChecker:
             with open(self.config_file, "r") as f:
                 return json.load(f)
         return {}
+
+    def check_individual_ticket(self, ticket_id):
+        """
+        Check if a specific ticket ID is available for purchase
+
+        Args:
+            ticket_id (int): The ticket ID to check
+
+        Returns:
+            dict: Dictionary with status and details for this specific ticket
+        """
+        base_url = "https://www.sportstiming.dk/event/6583/resale/ticket"
+        ticket_url = f"{base_url}/{ticket_id}"
+
+        try:
+            response = requests.get(ticket_url, headers=self.headers, timeout=3)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, "html.parser")
+            page_text = soup.get_text()
+
+            # The specific Danish message indicating ticket is not available
+            unavailable_message = "Det er p.t. ikke muligt at foretage dette valg, da alt enten er solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
+
+            # Also check for English version
+            unavailable_message_en = "It is currently not possible to make this choice, as everything is either sold or reserved. If another customer cancels their purchase, the reservation may possibly be released again."
+
+            # Check for expired/cancelled tickets
+            expired_messages = [
+                "completed or has been cancelled",
+                "expired",
+                "cancelled",
+                "afsluttet",
+                "annulleret",
+            ]
+
+            # Debug logging
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    f"Page content for ticket {ticket_id}: {page_text[:500]}..."
+                )
+                self.logger.debug(f"Looking for unavailable message in content...")
+                if unavailable_message in page_text:
+                    self.logger.debug("Found Danish unavailable message")
+                if unavailable_message_en in page_text:
+                    self.logger.debug("Found English unavailable message")
+
+            # Check if ticket is expired/cancelled
+            is_expired = any(
+                exp_msg.lower() in page_text.lower() for exp_msg in expired_messages
+            )
+
+            if unavailable_message in page_text or unavailable_message_en in page_text:
+                status = "NO_TICKETS"
+                message = f"Ticket {ticket_id} is sold or reserved"
+            elif is_expired:
+                status = "NO_TICKETS"
+                message = f"Ticket {ticket_id} is expired or cancelled"
+            elif (
+                len(page_text.strip()) < 2000
+            ):  # Very short pages are likely invalid/expired
+                status = "NO_TICKETS"
+                message = f"Ticket {ticket_id} appears to be invalid (page too short)"
+            else:
+                # Look for the buy button "Køb" to confirm ticket is available
+                buy_button = soup.find(
+                    string=lambda text: text and "køb" in text.lower()
+                )
+
+                # Also look for price information to confirm it's a valid ticket page
+                price_elements = soup.find_all(
+                    string=lambda text: text
+                    and (
+                        "sek" in text.lower()
+                        or "kr" in text.lower()
+                        or "dkk" in text.lower()
+                    )
+                )
+
+                if buy_button or price_elements:
+                    status = "TICKETS_AVAILABLE"
+                    message = (
+                        f"🎫 Ticket {ticket_id} is AVAILABLE for purchase! Buy now!"
+                    )
+                else:
+                    # Might be available but unclear
+                    status = "TICKETS_AVAILABLE"
+                    message = f"🎫 Ticket {ticket_id} may be available (no unavailable message found)"
+
+            result = {
+                "timestamp": datetime.now().isoformat(),
+                "status": status,
+                "message": message,
+                "ticket_id": ticket_id,
+                "url": ticket_url,
+            }
+
+            return result
+
+        except requests.RequestException as e:
+            self.logger.error(f"Request failed for ticket {ticket_id}: {e}")
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "status": "ERROR",
+                "message": f"Failed to fetch ticket {ticket_id}: {e}",
+                "ticket_id": ticket_id,
+                "url": ticket_url,
+            }
+        except Exception as e:
+            self.logger.error(f"Unexpected error for ticket {ticket_id}: {e}")
+            return {
+                "timestamp": datetime.now().isoformat(),
+                "status": "ERROR",
+                "message": f"Unexpected error for ticket {ticket_id}: {e}",
+                "ticket_id": ticket_id,
+                "url": ticket_url,
+            }
+
+    def check_ticket_range(self):
+        """
+        Check a range of ticket IDs for availability
+
+        Returns:
+            dict: Summary of results for all checked tickets
+        """
+        if not self.ticket_id_range:
+            self.ticket_id_range = (54296, 54320)
+            self.logger.info(
+                "No ticket range specified, using default range: 54296-54320"
+            )
+
+        start_id, end_id = self.ticket_id_range
+        available_tickets = []
+        total_checked = 0
+
+        self.logger.info(f"Checking ticket IDs from {start_id} to {end_id}")
+
+        for ticket_id in range(start_id, end_id + 1):
+            total_checked += 1
+            self.logger.debug(f"Checking ticket {ticket_id}")
+
+            result = self.check_individual_ticket(ticket_id)
+
+            if result["status"] == "TICKETS_AVAILABLE":
+                available_tickets.append(result)
+                self.logger.info(f"✅ Found available ticket: {ticket_id}")
+
+                # Send notification immediately for this specific ticket
+                immediate_notification = {
+                    "timestamp": result["timestamp"],
+                    "status": "TICKETS_AVAILABLE",
+                    "message": f"🎫 URGENT: Ticket {ticket_id} is AVAILABLE NOW!",
+                    "available_tickets": [result],
+                    "checked_count": 1,
+                    "range": f"{ticket_id}",
+                    "url": result["url"],
+                }
+
+                self.logger.info(f"🚨 SENDING IMMEDIATE ALERT for ticket {ticket_id}!")
+                self.send_notifications(immediate_notification, force=True)
+
+            elif result["status"] == "ERROR":
+                self.logger.warning(
+                    f"❌ Error checking ticket {ticket_id}: {result['message']}"
+                )
+            else:
+                self.logger.debug(f"❌ Ticket {ticket_id} not available")
+
+            # Add a small delay between requests to be respectful
+            time.sleep(random.uniform(0.5, 2.0))
+
+        # Prepare summary result (this won't trigger additional notifications)
+        if available_tickets:
+            status = "TICKETS_AVAILABLE"
+            message = f"🎫 Found {len(available_tickets)} available tickets out of {total_checked} checked!"
+            ticket_ids = [ticket["ticket_id"] for ticket in available_tickets]
+            message += f" Ticket IDs: {ticket_ids}"
+        else:
+            status = "NO_TICKETS"
+            message = f"No available tickets found in range {start_id}-{end_id} ({total_checked} tickets checked)"
+
+        result = {
+            "timestamp": datetime.now().isoformat(),
+            "status": status,
+            "message": message,
+            "available_tickets": available_tickets,
+            "checked_count": total_checked,
+            "range": f"{start_id}-{end_id}",
+        }
+
+        return result
 
     def check_tickets_available(self):
         """
@@ -338,14 +537,46 @@ Time: {result['timestamp'][:19]}"""
             message = escape_markdown(result["message"])
             timestamp = escape_markdown(result["timestamp"][:19])
 
-            message_text = f"""🎫 *Sportstiming Ticket Alert*
+            # Handle different result types
+            if "available_tickets" in result and result["available_tickets"]:
+                # This is a ticket range check with individual tickets
+                ticket_details = ""
+                for ticket in result["available_tickets"][
+                    :5
+                ]:  # Limit to first 5 tickets
+                    ticket_id = ticket["ticket_id"]
+                    ticket_url = ticket["url"]
+                    ticket_details += f"\n🎫 [Ticket {ticket_id}]({ticket_url})"
+
+                if len(result["available_tickets"]) > 5:
+                    ticket_details += f"\n\\.\\.\\. and {len(result['available_tickets']) - 5} more tickets"
+
+                message_text = f"""🎫 *Sportstiming Ticket Alert*
 
 *Status:* {status}
 *Message:* {message}
-*Ticket Count:* {result['ticket_count']}
+*Range:* {escape_markdown(result.get('range', 'N/A'))}
+*Checked:* {result.get('checked_count', 0)} tickets
 *Time:* {timestamp}
 
-[Check Website]({result['url']})"""
+*Available Tickets:*{ticket_details}
+
+[Check Main Page]({escape_markdown(self.event_url)})"""
+            else:
+                # Regular ticket check or single ticket
+                ticket_count = result.get(
+                    "ticket_count", result.get("checked_count", 0)
+                )
+                url_to_show = result.get("url", self.event_url)
+
+                message_text = f"""🎫 *Sportstiming Ticket Alert*
+
+*Status:* {status}
+*Message:* {message}
+*Ticket Count:* {ticket_count}
+*Time:* {timestamp}
+
+[Check Website]({escape_markdown(url_to_show)})"""
 
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
 
@@ -428,7 +659,7 @@ Time: {result['timestamp'][:19]}"""
         self.send_telegram_notification(test_result)
         return True
 
-    def test_all_notifications(self):
+    def test_all_notifications(self, force=False):
         """
         Test all configured notification methods
         """
@@ -441,7 +672,7 @@ Time: {result['timestamp'][:19]}"""
         }
 
         self.logger.info("Sending test notifications...")
-        self.send_notifications(test_result, force=True)
+        self.send_notifications(test_result, force=force)
         return True
 
     def get_telegram_bot_info(self):
@@ -580,27 +811,59 @@ Time: {result['timestamp'][:19]}"""
 
     def run_single_check(self):
         """Run a single check and return the result"""
-        self.logger.info("Checking for available tickets...")
-        result = self.check_tickets_available()
-
-        self.logger.info(f"Status: {result['status']} - {result['message']}")
-        if result["ticket_count"] > 0:
+        # If no ticket range specified, use the default range 54296-54320
+        if not self.ticket_id_range:
+            self.ticket_id_range = (54296, 54320)
             self.logger.info(
-                f"Found {result['ticket_count']} potential ticket listings"
+                "No ticket range specified, using default range: 54296-54320"
             )
 
-        # Send notifications if tickets are available
-        if result["status"] == "TICKETS_AVAILABLE":
-            self.send_notifications(result)
+        if self.ticket_id_range:
+            # Check specific ticket ID range (notifications sent immediately per ticket)
+            self.logger.info(
+                f"Checking ticket ID range {self.ticket_id_range[0]}-{self.ticket_id_range[1]}..."
+            )
+            result = self.check_ticket_range()
+
+            self.logger.info(f"Status: {result['status']} - {result['message']}")
+            if result.get("available_tickets"):
+                self.logger.info(
+                    f"Found {len(result['available_tickets'])} available tickets!"
+                )
+                for ticket in result["available_tickets"]:
+                    self.logger.info(
+                        f"  🎫 Ticket {ticket['ticket_id']}: {ticket['url']}"
+                    )
+        else:
+            # Regular check of the main resale page (this should not happen anymore)
+            self.logger.info("Checking for available tickets...")
+            result = self.check_tickets_available()
+
+            self.logger.info(f"Status: {result['status']} - {result['message']}")
+            if result.get("ticket_count", 0) > 0:
+                self.logger.info(
+                    f"Found {result['ticket_count']} potential ticket listings"
+                )
+
+            # Only send notifications for regular checks (not ticket range checks)
+            if result["status"] == "TICKETS_AVAILABLE":
+                self.send_notifications(result)
 
         return result
 
     def run_continuous_monitoring(self):
         """Run continuous monitoring with specified interval"""
         self.logger.info(
-            f"Starting continuous monitoring every {self.check_interval} seconds"
+            f"Starting continuous ticket monitoring every {self.check_interval} seconds"
         )
-        self.logger.info(f"Monitoring URL: {self.event_url}")
+
+        # The ticket range will be set by run_single_check if not already specified
+        if self.ticket_id_range:
+            self.logger.info(
+                f"Monitoring ticket range: {self.ticket_id_range[0]}-{self.ticket_id_range[1]}"
+            )
+        else:
+            self.logger.info("Will use default ticket range: 54296-54320")
 
         if self.notify_all_statuses:
             self.logger.info("📢 Notifications enabled for ALL statuses")
@@ -608,45 +871,47 @@ Time: {result['timestamp'][:19]}"""
             self.logger.info("📢 Notifications only for TICKETS_AVAILABLE status")
 
         last_status = None
+        last_available_count = 0
 
         try:
             while True:
                 result = self.run_single_check()
 
-                # Send notifications based on configuration
-                if self.notify_all_statuses:
-                    # Send notification only when status changes
-                    if last_status != result["status"]:
-                        self.send_notifications(result)
+                current_available_count = len(result.get("available_tickets", []))
+
+                # Individual tickets already sent notifications immediately
+                # Just log the summary here
+                if current_available_count > 0:
+                    self.logger.info(
+                        f"✅ Summary: {current_available_count} tickets currently available"
+                    )
+                    for ticket in result.get("available_tickets", []):
                         self.logger.info(
-                            f"Status changed: {last_status} → {result['status']}"
+                            f"  📍 Ticket {ticket['ticket_id']}: {ticket['url']}"
                         )
-                    else:
-                        self.logger.debug(f"Status unchanged: {result['status']}")
                 else:
-                    # Only send notification when status changes to tickets available
-                    # OR when tickets become unavailable after being available (to inform about status change)
-                    if (
-                        result["status"] == "TICKETS_AVAILABLE"
-                        and last_status != "TICKETS_AVAILABLE"
-                    ):
-                        self.send_notifications(result)
-                        self.logger.info(
-                            f"🎫 Tickets became available! (was: {last_status})"
-                        )
-                    elif (
-                        last_status == "TICKETS_AVAILABLE"
-                        and result["status"] != "TICKETS_AVAILABLE"
-                    ):
-                        # Optional: notify when tickets are no longer available
-                        # You can comment this out if you don't want these notifications
-                        self.logger.info(
-                            f"⚠️ Tickets no longer available: {last_status} → {result['status']}"
-                        )
-                    else:
-                        self.logger.debug(f"No notification needed: {result['status']}")
+                    self.logger.info(
+                        f"❌ No tickets available in range {self.ticket_id_range[0]}-{self.ticket_id_range[1]}"
+                    )
+
+                # Only send summary notifications if notify_all_statuses is enabled AND status changed
+                if self.notify_all_statuses and last_status != result["status"]:
+                    # Send a summary notification for status changes
+                    summary_notification = {
+                        "timestamp": result["timestamp"],
+                        "status": result["status"],
+                        "message": f"Status update: {result['message']}",
+                        "available_tickets": result.get("available_tickets", []),
+                        "checked_count": result.get("checked_count", 0),
+                        "range": result.get("range", ""),
+                    }
+                    self.send_notifications(summary_notification)
+                    self.logger.info(
+                        f"📊 Summary notification sent for status change: {last_status} → {result['status']}"
+                    )
 
                 last_status = result["status"]
+                last_available_count = current_available_count
 
                 self.logger.info(f"Next check in {self.check_interval} seconds...")
                 time.sleep(self.check_interval)
@@ -656,6 +921,7 @@ Time: {result['timestamp'][:19]}"""
         except Exception as e:
             self.logger.error(f"Monitoring error: {e}")
 
+    # Troubleshooting functions
     def troubleshoot_telegram(self):
         """
         Comprehensive Telegram troubleshooting guide
@@ -919,6 +1185,107 @@ Time: {result['timestamp'][:19]}"""
 
         return found_chats
 
+    def debug_ticket_content(self, ticket_id):
+        """
+        Debug method to see the actual content of a ticket page
+
+        Args:
+            ticket_id (int): The ticket ID to debug
+        """
+        base_url = "https://www.sportstiming.dk/event/6583/resale/ticket"
+        ticket_url = f"{base_url}/{ticket_id}"
+
+        try:
+            response = requests.get(ticket_url, headers=self.headers, timeout=30)
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, "html.parser")
+            page_text = soup.get_text()
+
+            print(f"🔍 DEBUG: Ticket {ticket_id} page content analysis")
+            print("=" * 60)
+            print(f"URL: {ticket_url}")
+            print(f"Status Code: {response.status_code}")
+            print(f"Content Length: {len(page_text)} characters")
+            print(f"HTML Content Length: {len(response.content)} bytes")
+
+            print("\n📄 Raw HTML (first 1500 characters):")
+            print("-" * 40)
+            print(response.content.decode("utf-8", errors="ignore")[:1500])
+            print("-" * 40)
+
+            print("\n📄 Text content (first 1000 characters):")
+            print("-" * 40)
+            print(page_text[:1000])
+            print("-" * 40)
+
+            # Check for specific strings
+            unavailable_message = "Det er p.t. ikke muligt at foretage dette valg, da alt enten er solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
+            unavailable_message_en = "It is currently not possible to make this choice, as everything is either sold or reserved. If another customer cancels their purchase, the reservation may possibly be released again."
+
+            # Also check for partial messages that might appear
+            partial_messages = [
+                "ikke muligt at foretage dette valg",
+                "solgt eller reserveret",
+                "reserveret",
+                "currently not possible",
+                "sold or reserved",
+                "reserved",
+            ]
+
+            print(f"\n🔍 String analysis:")
+            print(
+                f"Contains full Danish 'unavailable' message: {'✅ YES' if unavailable_message in page_text else '❌ NO'}"
+            )
+            print(
+                f"Contains full English 'unavailable' message: {'✅ YES' if unavailable_message_en in page_text else '❌ NO'}"
+            )
+
+            print(f"\n🔍 Partial message analysis:")
+            for partial in partial_messages:
+                found = partial.lower() in page_text.lower()
+                print(f"Contains '{partial}': {'✅ YES' if found else '❌ NO'}")
+
+            # Also check in raw HTML
+            raw_html = response.content.decode("utf-8", errors="ignore").lower()
+            print(f"\n🔍 Raw HTML analysis:")
+            for partial in partial_messages:
+                found = partial.lower() in raw_html
+                print(f"HTML contains '{partial}': {'✅ YES' if found else '❌ NO'}")
+
+            # Look for buy button
+            buy_button = soup.find(string=lambda text: text and "køb" in text.lower())
+            print(f"Contains 'køb' button text: {'✅ YES' if buy_button else '❌ NO'}")
+            if buy_button:
+                print(f"Buy button text: '{buy_button.strip()}'")
+
+            # Look for price
+            price_elements = soup.find_all(
+                string=lambda text: text
+                and (
+                    "sek" in text.lower()
+                    or "kr" in text.lower()
+                    or "dkk" in text.lower()
+                )
+            )
+            print(
+                f"Contains price information: {'✅ YES' if price_elements else '❌ NO'}"
+            )
+            if price_elements:
+                print(
+                    f"Price elements found: {[elem.strip() for elem in price_elements[:3]]}"
+                )
+
+            # Look for specific keywords that might indicate availability
+            keywords = ["reserveret", "solgt", "køb", "billet", "pris", "sek", "kr"]
+            print(f"\n🏷️ Keyword analysis:")
+            for keyword in keywords:
+                count = page_text.lower().count(keyword)
+                print(f"'{keyword}': {count} occurrences")
+
+        except Exception as e:
+            print(f"❌ Error checking ticket {ticket_id}: {e}")
+
 
 def create_sample_config():
     """Create a sample configuration file with all notification options"""
@@ -1027,6 +1394,21 @@ def main():
         action="store_true",
         help="Send notifications for all statuses, not just when tickets are available",
     )
+    parser.add_argument(
+        "--ticket-range",
+        type=str,
+        help="Check specific ticket ID range, format: start-end (e.g., 54296-54305)",
+    )
+    parser.add_argument(
+        "--check-ticket",
+        type=int,
+        help="Check a single specific ticket ID",
+    )
+    parser.add_argument(
+        "--debug-ticket",
+        type=int,
+        help="Debug the content of a specific ticket ID to see what the page contains",
+    )
 
     args = parser.parse_args()
 
@@ -1038,11 +1420,34 @@ def main():
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Parse ticket range if provided
+    ticket_id_range = None
+    if args.ticket_range:
+        try:
+            start_str, end_str = args.ticket_range.split("-")
+            start_id = int(start_str.strip())
+            end_id = int(end_str.strip())
+            if start_id > end_id:
+                print("❌ Error: Start ID must be less than or equal to end ID")
+                return
+            ticket_id_range = (start_id, end_id)
+            print(f"🎯 Will check ticket ID range: {start_id} to {end_id}")
+        except ValueError:
+            print(
+                "❌ Error: Invalid ticket range format. Use: start-end (e.g., 54296-54305)"
+            )
+            return
+    elif args.check_ticket:
+        # Single ticket check - convert to range of 1
+        ticket_id_range = (args.check_ticket, args.check_ticket)
+        print(f"🎯 Will check single ticket ID: {args.check_ticket}")
+
     checker = SportstimingTicketChecker(
         event_url=args.url,
         check_interval=args.interval,
         config_file=args.config,
         notify_all_statuses=args.notify_all,
+        ticket_id_range=ticket_id_range,
     )
 
     if args.test_telegram:
@@ -1086,6 +1491,10 @@ def main():
                 print(f'   "chat_id": "{chat_id}"  # {info["name"]}')
         else:
             print("\n📭 No chat IDs found")
+        return
+
+    if args.debug_ticket:
+        checker.debug_ticket_content(args.debug_ticket)
         return
 
     if args.single:

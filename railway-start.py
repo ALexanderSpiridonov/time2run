@@ -48,6 +48,29 @@ def create_config_from_env():
             "to_email": os.getenv("EMAIL_TO"),
         }
 
+    # SMS/Twilio configuration (optional)
+    if all(
+        [
+            os.getenv("TWILIO_ACCOUNT_SID"),
+            os.getenv("TWILIO_AUTH_TOKEN"),
+            os.getenv("TWILIO_FROM_NUMBER"),
+            os.getenv("TWILIO_TO_NUMBER"),
+        ]
+    ):
+        config["sms"] = {
+            "account_sid": os.getenv("TWILIO_ACCOUNT_SID"),
+            "auth_token": os.getenv("TWILIO_AUTH_TOKEN"),
+            "from_number": os.getenv("TWILIO_FROM_NUMBER"),
+            "to_number": os.getenv("TWILIO_TO_NUMBER"),
+        }
+
+    # Pushover configuration (optional)
+    if all([os.getenv("PUSHOVER_APP_TOKEN"), os.getenv("PUSHOVER_USER_KEY")]):
+        config["pushover"] = {
+            "app_token": os.getenv("PUSHOVER_APP_TOKEN"),
+            "user_key": os.getenv("PUSHOVER_USER_KEY"),
+        }
+
     return config
 
 
@@ -64,6 +87,7 @@ def main():
     )
     print(f"   CHECK_INTERVAL: {os.getenv('CHECK_INTERVAL', 'NOT SET')}")
     print(f"   NOTIFY_ALL: {os.getenv('NOTIFY_ALL', 'NOT SET')}")
+    print(f"   TICKET_RANGE: {os.getenv('TICKET_RANGE', 'NOT SET')}")
 
     # Show first few characters of bot token if set (for debugging)
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -92,14 +116,22 @@ def main():
     print("✅ Config file created from environment variables")
 
     # Get configuration from environment
-    check_interval = int(os.getenv("CHECK_INTERVAL", "300"))
+    check_interval = int(
+        os.getenv("CHECK_INTERVAL", "60")
+    )  # Default 2 minutes for faster checking
     ticket_url = os.getenv(
         "TICKET_URL", "https://www.sportstiming.dk/event/6583/resale"
     )
-    notify_all = os.getenv("NOTIFY_ALL", "true").lower() == "true"
+    notify_all = (
+        os.getenv("NOTIFY_ALL", "false").lower() == "true"
+    )  # Default to false for cleaner notifications
+    ticket_range = os.getenv("TICKET_RANGE")  # e.g., "54296-54310"
 
     print(f"🎯 Starting monitoring:")
-    print(f"   URL: {ticket_url}")
+    if ticket_range:
+        print(f"   Ticket Range: {ticket_range}")
+    else:
+        print(f"   Ticket Range: 54296-54310 (default)")
     print(f"   Interval: {check_interval} seconds")
     print(f"   Notify all statuses: {notify_all}")
 
@@ -111,15 +143,19 @@ def main():
         "config.json",
         "--interval",
         str(check_interval),
-        "--url",
-        ticket_url,
     ]
 
+    # Add ticket range if specified
+    if ticket_range:
+        cmd.extend(["--ticket-range", ticket_range])
+
+    # Add notify all if enabled
     if notify_all:
         cmd.append("--notify-all")
 
+    print(f"🏃 Starting application with command: {' '.join(cmd)}")
+
     # Start the application
-    print("🏃 Starting application...")
     os.execvp("python", cmd)
 
 
