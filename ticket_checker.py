@@ -80,6 +80,7 @@ class SportstimingTicketChecker:
 
             # Also check for the general "no tickets" message
             no_tickets_text = "Der findes ingen billetter til salg"
+            no_tickets_text_en = "No tickets for sale exists"
 
             page_text = soup.get_text()
 
@@ -87,7 +88,7 @@ class SportstimingTicketChecker:
             if sold_out_message in page_text:
                 status = "NO_TICKETS"
                 message = "All tickets are sold or reserved"
-            elif no_tickets_text in page_text:
+            elif no_tickets_text or no_tickets_text_en in page_text:
                 status = "NO_TICKETS"
                 message = "No tickets available for sale"
 
