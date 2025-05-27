@@ -604,15 +604,36 @@ Time: {result['timestamp'][:19]}"""
 
                 # Send notifications based on configuration
                 if self.notify_all_statuses:
-                    # Send notification for every check
-                    self.send_notifications(result)
+                    # Send notification only when status changes
+                    if last_status != result["status"]:
+                        self.send_notifications(result)
+                        self.logger.info(
+                            f"Status changed: {last_status} → {result['status']}"
+                        )
+                    else:
+                        self.logger.debug(f"Status unchanged: {result['status']}")
                 else:
-                    # Only send notification if status changed to tickets available
+                    # Only send notification when status changes to tickets available
+                    # OR when tickets become unavailable after being available (to inform about status change)
                     if (
                         result["status"] == "TICKETS_AVAILABLE"
                         and last_status != "TICKETS_AVAILABLE"
                     ):
                         self.send_notifications(result)
+                        self.logger.info(
+                            f"🎫 Tickets became available! (was: {last_status})"
+                        )
+                    elif (
+                        last_status == "TICKETS_AVAILABLE"
+                        and result["status"] != "TICKETS_AVAILABLE"
+                    ):
+                        # Optional: notify when tickets are no longer available
+                        # You can comment this out if you don't want these notifications
+                        self.logger.info(
+                            f"⚠️ Tickets no longer available: {last_status} → {result['status']}"
+                        )
+                    else:
+                        self.logger.debug(f"No notification needed: {result['status']}")
 
                 last_status = result["status"]
 
