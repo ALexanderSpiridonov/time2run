@@ -52,7 +52,13 @@ class SportstimingTicketChecker:
 
         # User agent to appear as a regular browser
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Accept-Language": "da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+            "Cookie": "_ga_85EWGLXPLM=GS2.2.s1748348529$o4$g1$t1748349400$j0$l0$h0; _ga=GA1.2.1691620217.1748265310; _gid=GA1.2.1985560061.1748265310; st-lang=en-GB",
         }
 
     def load_config(self):
