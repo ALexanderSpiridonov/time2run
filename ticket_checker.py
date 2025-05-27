@@ -63,14 +63,44 @@ class SportstimingTicketChecker:
 
         # User agent to appear as a regular browser
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             "Accept-Language": "da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7",
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "keep-alive",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-            "Cookie": "_ga_85EWGLXPLM=GS2.2.s1748348529$o4$g1$t1748349400$j0$l0$h0; _ga=GA1.2.1691620217.1748265310; _gid=GA1.2.1985560061.1748265310; st-lang=en-GB",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
+            "DNT": "1",
+            "Sec-CH-UA": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"macOS"',
         }
+
+        # Create a session for better connection handling and cookie persistence
+        self.session = requests.Session()
+        self.session.headers.update(self.headers)
+
+        # Initialize session by visiting main page
+        self._initialize_session()
+
+    def _initialize_session(self):
+        """Initialize session by visiting the main resale page to establish cookies"""
+        try:
+            main_url = "https://www.sportstiming.dk/event/6583/resale"
+            self.logger.debug("Initializing session with main page visit")
+            response = self.session.get(main_url, timeout=10)
+            if response.status_code == 200:
+                self.logger.debug("Session initialized successfully")
+            else:
+                self.logger.warning(
+                    f"Session initialization returned status {response.status_code}"
+                )
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize session: {e}")
 
     def load_config(self):
         """Load configuration from JSON file"""
@@ -92,109 +122,180 @@ class SportstimingTicketChecker:
         base_url = "https://www.sportstiming.dk/event/6583/resale/ticket"
         ticket_url = f"{base_url}/{ticket_id}"
 
-        try:
-            response = requests.get(ticket_url, headers=self.headers, timeout=3)
-            response.raise_for_status()
+        # Try multiple strategies to avoid 403 errors
+        strategies = [
+            {"timeout": 10, "delay": 0},  # First try - normal
+            {"timeout": 15, "delay": 2},  # Second try - with delay
+            {"timeout": 20, "delay": 5},  # Third try - longer delay
+        ]
 
-            soup = BeautifulSoup(response.content, "html.parser")
-            page_text = soup.get_text()
-
-            # The specific Danish message indicating ticket is not available
-            unavailable_message = "Det er p.t. ikke muligt at foretage dette valg, da alt enten er solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
-
-            # Also check for English version
-            unavailable_message_en = "It is currently not possible to make this choice, as everything is either sold or reserved. If another customer cancels their purchase, the reservation may possibly be released again."
-
-            # Check for expired/cancelled tickets
-            expired_messages = [
-                "completed or has been cancelled",
-                "expired",
-                "cancelled",
-                "afsluttet",
-                "annulleret",
-            ]
-
-            # Debug logging
-            if self.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(
-                    f"Page content for ticket {ticket_id}: {page_text[:500]}..."
-                )
-                self.logger.debug(f"Looking for unavailable message in content...")
-                if unavailable_message in page_text:
-                    self.logger.debug("Found Danish unavailable message")
-                if unavailable_message_en in page_text:
-                    self.logger.debug("Found English unavailable message")
-
-            # Check if ticket is expired/cancelled
-            is_expired = any(
-                exp_msg.lower() in page_text.lower() for exp_msg in expired_messages
-            )
-
-            if unavailable_message in page_text or unavailable_message_en in page_text:
-                status = "NO_TICKETS"
-                message = f"Ticket {ticket_id} is sold or reserved"
-            elif is_expired:
-                status = "NO_TICKETS"
-                message = f"Ticket {ticket_id} is expired or cancelled"
-            elif (
-                len(page_text.strip()) < 2000
-            ):  # Very short pages are likely invalid/expired
-                status = "NO_TICKETS"
-                message = f"Ticket {ticket_id} appears to be invalid (page too short)"
-            else:
-                # Look for the buy button "Køb" to confirm ticket is available
-                buy_button = soup.find(
-                    string=lambda text: text and "køb" in text.lower()
-                )
-
-                # Also look for price information to confirm it's a valid ticket page
-                price_elements = soup.find_all(
-                    string=lambda text: text
-                    and (
-                        "sek" in text.lower()
-                        or "kr" in text.lower()
-                        or "dkk" in text.lower()
+        for attempt, strategy in enumerate(strategies, 1):
+            try:
+                if strategy["delay"] > 0:
+                    self.logger.debug(
+                        f"Waiting {strategy['delay']} seconds before retry {attempt}"
                     )
+                    time.sleep(strategy["delay"])
+
+                response = self.session.get(
+                    ticket_url,
+                    timeout=strategy["timeout"],
+                    allow_redirects=True,
                 )
 
-                if buy_button or price_elements:
-                    status = "TICKETS_AVAILABLE"
+                # Handle 403 Forbidden specifically
+                if response.status_code == 403:
+                    self.logger.warning(
+                        f"403 Forbidden for ticket {ticket_id} (attempt {attempt})"
+                    )
+                    if attempt < len(strategies):
+                        continue  # Try next strategy
+                    else:
+                        # After all attempts, treat 403 as "not available"
+                        return {
+                            "timestamp": datetime.now().isoformat(),
+                            "status": "NO_TICKETS",
+                            "message": f"Ticket {ticket_id} access forbidden (likely not available or protected)",
+                            "ticket_id": ticket_id,
+                            "url": ticket_url,
+                        }
+
+                # Handle other HTTP errors
+                if response.status_code == 404:
+                    return {
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "NO_TICKETS",
+                        "message": f"Ticket {ticket_id} not found (404)",
+                        "ticket_id": ticket_id,
+                        "url": ticket_url,
+                    }
+
+                response.raise_for_status()  # Raise for other HTTP errors
+
+                # Success - parse the content
+                soup = BeautifulSoup(response.content, "html.parser")
+                page_text = soup.get_text()
+
+                # The specific Danish message indicating ticket is not available
+                unavailable_message = "Det er p.t. ikke muligt at foretage dette valg, da alt enten er solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
+
+                # Also check for English version
+                unavailable_message_en = "It is currently not possible to make this choice, as everything is either sold or reserved. If another customer cancels their purchase, the reservation may possibly be released again."
+
+                # Check for expired/cancelled tickets
+                expired_messages = [
+                    "completed or has been cancelled",
+                    "expired",
+                    "cancelled",
+                    "afsluttet",
+                    "annulleret",
+                ]
+
+                # Debug logging
+                if self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(
+                        f"Page content for ticket {ticket_id}: {page_text[:500]}..."
+                    )
+                    self.logger.debug(f"Looking for unavailable message in content...")
+                    if unavailable_message in page_text:
+                        self.logger.debug("Found Danish unavailable message")
+                    if unavailable_message_en in page_text:
+                        self.logger.debug("Found English unavailable message")
+
+                # Check if ticket is expired/cancelled
+                is_expired = any(
+                    exp_msg.lower() in page_text.lower() for exp_msg in expired_messages
+                )
+
+                if (
+                    unavailable_message in page_text
+                    or unavailable_message_en in page_text
+                ):
+                    status = "NO_TICKETS"
+                    message = f"Ticket {ticket_id} is sold or reserved"
+                elif is_expired:
+                    status = "NO_TICKETS"
+                    message = f"Ticket {ticket_id} is expired or cancelled"
+                elif (
+                    len(page_text.strip()) < 2000
+                ):  # Very short pages are likely invalid/expired
+                    status = "NO_TICKETS"
                     message = (
-                        f"🎫 Ticket {ticket_id} is AVAILABLE for purchase! Buy now!"
+                        f"Ticket {ticket_id} appears to be invalid (page too short)"
                     )
                 else:
-                    # Might be available but unclear
-                    status = "TICKETS_AVAILABLE"
-                    message = f"🎫 Ticket {ticket_id} may be available (no unavailable message found)"
+                    # Look for the buy button "Køb" to confirm ticket is available
+                    buy_button = soup.find(
+                        string=lambda text: text and "køb" in text.lower()
+                    )
 
-            result = {
-                "timestamp": datetime.now().isoformat(),
-                "status": status,
-                "message": message,
-                "ticket_id": ticket_id,
-                "url": ticket_url,
-            }
+                    # Also look for price information to confirm it's a valid ticket page
+                    price_elements = soup.find_all(
+                        string=lambda text: text
+                        and (
+                            "sek" in text.lower()
+                            or "kr" in text.lower()
+                            or "dkk" in text.lower()
+                        )
+                    )
 
-            return result
+                    if buy_button or price_elements:
+                        status = "TICKETS_AVAILABLE"
+                        message = (
+                            f"🎫 Ticket {ticket_id} is AVAILABLE for purchase! Buy now!"
+                        )
+                    else:
+                        # Might be available but unclear
+                        status = "TICKETS_AVAILABLE"
+                        message = f"🎫 Ticket {ticket_id} may be available (no unavailable message found)"
 
-        except requests.RequestException as e:
-            self.logger.error(f"Request failed for ticket {ticket_id}: {e}")
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "status": "ERROR",
-                "message": f"Failed to fetch ticket {ticket_id}: {e}",
-                "ticket_id": ticket_id,
-                "url": ticket_url,
-            }
-        except Exception as e:
-            self.logger.error(f"Unexpected error for ticket {ticket_id}: {e}")
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "status": "ERROR",
-                "message": f"Unexpected error for ticket {ticket_id}: {e}",
-                "ticket_id": ticket_id,
-                "url": ticket_url,
-            }
+                result = {
+                    "timestamp": datetime.now().isoformat(),
+                    "status": status,
+                    "message": message,
+                    "ticket_id": ticket_id,
+                    "url": ticket_url,
+                }
+
+                return result
+
+            except requests.exceptions.Timeout:
+                self.logger.warning(
+                    f"Timeout for ticket {ticket_id} (attempt {attempt})"
+                )
+                if attempt < len(strategies):
+                    continue
+                else:
+                    return {
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "ERROR",
+                        "message": f"Timeout checking ticket {ticket_id} after {len(strategies)} attempts",
+                        "ticket_id": ticket_id,
+                        "url": ticket_url,
+                    }
+            except requests.RequestException as e:
+                self.logger.warning(
+                    f"Request failed for ticket {ticket_id} (attempt {attempt}): {e}"
+                )
+                if attempt < len(strategies):
+                    continue
+                else:
+                    return {
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "ERROR",
+                        "message": f"Failed to fetch ticket {ticket_id} after {len(strategies)} attempts: {e}",
+                        "ticket_id": ticket_id,
+                        "url": ticket_url,
+                    }
+            except Exception as e:
+                self.logger.error(f"Unexpected error for ticket {ticket_id}: {e}")
+                return {
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "ERROR",
+                    "message": f"Unexpected error for ticket {ticket_id}: {e}",
+                    "ticket_id": ticket_id,
+                    "url": ticket_url,
+                }
 
     def check_ticket_range(self):
         """
@@ -262,7 +363,7 @@ class SportstimingTicketChecker:
                 self.logger.debug(f"❌ Ticket {ticket_id} not available")
 
             # Add a small delay between requests to be respectful
-            time.sleep(random.uniform(0.5, 2.0))
+            time.sleep(random.uniform(2.0, 5.0))
 
         # Prepare summary result (this won't trigger additional notifications)
         if available_tickets:
@@ -311,7 +412,7 @@ class SportstimingTicketChecker:
             dict: Dictionary with status and details
         """
         try:
-            response = requests.get(self.event_url, headers=self.headers, timeout=30)
+            response = self.session.get(self.event_url, timeout=30)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, "html.parser")
@@ -1241,7 +1342,7 @@ Time: {result['timestamp'][:19]}"""
         ticket_url = f"{base_url}/{ticket_id}"
 
         try:
-            response = requests.get(ticket_url, headers=self.headers, timeout=30)
+            response = self.session.get(ticket_url, timeout=30)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, "html.parser")
