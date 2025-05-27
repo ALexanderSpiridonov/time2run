@@ -88,6 +88,9 @@ def main():
     print(f"   CHECK_INTERVAL: {os.getenv('CHECK_INTERVAL', 'NOT SET')}")
     print(f"   NOTIFY_ALL: {os.getenv('NOTIFY_ALL', 'NOT SET')}")
     print(f"   TICKET_RANGE: {os.getenv('TICKET_RANGE', 'NOT SET')}")
+    print(f"   TICKET_START_ID: {os.getenv('TICKET_START_ID', 'NOT SET')}")
+    print(f"   TICKET_END_ID: {os.getenv('TICKET_END_ID', 'NOT SET')}")
+    print(f"   TICKET_IDS: {os.getenv('TICKET_IDS', 'NOT SET')}")
 
     # Show first few characters of bot token if set (for debugging)
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -125,11 +128,33 @@ def main():
     notify_all = (
         os.getenv("NOTIFY_ALL", "false").lower() == "true"
     )  # Default to false for cleaner notifications
-    ticket_range = os.getenv("TICKET_RANGE")  # e.g., "54296-54310"
+
+    # Flexible ticket range configuration
+    ticket_range = None
+
+    # Option 1: TICKET_RANGE (e.g., "54310-54360")
+    if os.getenv("TICKET_RANGE"):
+        ticket_range = os.getenv("TICKET_RANGE")
+        print(f"   Using TICKET_RANGE: {ticket_range}")
+
+    # Option 2: Separate start and end IDs
+    elif os.getenv("TICKET_START_ID") and os.getenv("TICKET_END_ID"):
+        start_id = os.getenv("TICKET_START_ID")
+        end_id = os.getenv("TICKET_END_ID")
+        ticket_range = f"{start_id}-{end_id}"
+        print(f"   Using TICKET_START_ID and TICKET_END_ID: {ticket_range}")
+
+    # Option 3: Individual ticket IDs (comma-separated)
+    elif os.getenv("TICKET_IDS"):
+        ticket_ids = os.getenv("TICKET_IDS")
+        print(f"   Using individual TICKET_IDS: {ticket_ids}")
+        # For individual IDs, we'll pass them differently
 
     print(f"🎯 Starting monitoring:")
     if ticket_range:
         print(f"   Ticket Range: {ticket_range}")
+    elif os.getenv("TICKET_IDS"):
+        print(f"   Individual Tickets: {os.getenv('TICKET_IDS')}")
     else:
         print(f"   Ticket Range: 54310-54360 (default)")
     print(f"   Interval: {check_interval} seconds")
@@ -146,9 +171,13 @@ def main():
         str(check_interval),
     ]
 
-    # Add ticket range if specified
+    # Add ticket configuration
     if ticket_range:
         cmd.extend(["--ticket-range", ticket_range])
+    elif os.getenv("TICKET_IDS"):
+        # For individual tickets, use the new --ticket-ids argument
+        ticket_ids = os.getenv("TICKET_IDS")
+        cmd.extend(["--ticket-ids", ticket_ids])
 
     # Add notify all if enabled
     if notify_all:

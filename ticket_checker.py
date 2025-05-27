@@ -27,6 +27,7 @@ class SportstimingTicketChecker:
         config_file=None,
         notify_all_statuses=False,
         ticket_id_range=None,
+        specific_ticket_ids=None,
     ):
         """
         Initialize the ticket checker
@@ -37,6 +38,7 @@ class SportstimingTicketChecker:
             config_file (str): Path to config file for notifications
             notify_all_statuses (bool): Send notifications for all statuses, not just when tickets are available
             ticket_id_range (tuple): Tuple of (start_id, end_id) for checking specific ticket IDs
+            specific_ticket_ids (list): List of specific ticket IDs to check
         """
         self.event_url = event_url
         self.check_interval = check_interval
@@ -44,6 +46,7 @@ class SportstimingTicketChecker:
         self.config = self.load_config() if config_file else {}
         self.notify_all_statuses = notify_all_statuses
         self.ticket_id_range = ticket_id_range
+        self.specific_ticket_ids = specific_ticket_ids
 
         # Set up logging
         logging.basicConfig(
@@ -200,19 +203,34 @@ class SportstimingTicketChecker:
         Returns:
             dict: Summary of results for all checked tickets
         """
-        if not self.ticket_id_range:
+        # Determine which tickets to check
+        if self.specific_ticket_ids:
+            # Check specific individual ticket IDs
+            tickets_to_check = self.specific_ticket_ids
+            range_description = (
+                f"individual tickets: {','.join(map(str, tickets_to_check))}"
+            )
+        elif self.ticket_id_range:
+            # Check range of ticket IDs
+            start_id, end_id = self.ticket_id_range
+            tickets_to_check = list(range(start_id, end_id + 1))
+            range_description = f"{start_id} to {end_id}"
+        else:
+            # Default range
             self.ticket_id_range = (54310, 54360)
+            start_id, end_id = self.ticket_id_range
+            tickets_to_check = list(range(start_id, end_id + 1))
+            range_description = f"{start_id} to {end_id} (default)"
             self.logger.info(
                 "No ticket range specified, using default range: 54310-54360"
             )
 
-        start_id, end_id = self.ticket_id_range
         available_tickets = []
         total_checked = 0
 
-        self.logger.info(f"Checking ticket IDs from {start_id} to {end_id}")
+        self.logger.info(f"Checking ticket IDs: {range_description}")
 
-        for ticket_id in range(start_id, end_id + 1):
+        for ticket_id in tickets_to_check:
             total_checked += 1
             self.logger.debug(f"Checking ticket {ticket_id}")
 
@@ -254,7 +272,17 @@ class SportstimingTicketChecker:
             message += f" Ticket IDs: {ticket_ids}"
         else:
             status = "NO_TICKETS"
-            message = f"No available tickets found in range {start_id}-{end_id} ({total_checked} tickets checked)"
+            if self.specific_ticket_ids:
+                message = f"No available tickets found in specified IDs: {','.join(map(str, self.specific_ticket_ids))} ({total_checked} tickets checked)"
+                range_info = (
+                    f"individual: {','.join(map(str, self.specific_ticket_ids))}"
+                )
+            else:
+                start_id, end_id = (
+                    self.ticket_id_range if self.ticket_id_range else (54310, 54360)
+                )
+                message = f"No available tickets found in range {start_id}-{end_id} ({total_checked} tickets checked)"
+                range_info = f"{start_id}-{end_id}"
 
         result = {
             "timestamp": datetime.now().isoformat(),
@@ -262,7 +290,15 @@ class SportstimingTicketChecker:
             "message": message,
             "available_tickets": available_tickets,
             "checked_count": total_checked,
-            "range": f"{start_id}-{end_id}",
+            "range": (
+                range_info
+                if "range_info" in locals()
+                else (
+                    f"{self.ticket_id_range[0]}-{self.ticket_id_range[1]}"
+                    if self.ticket_id_range
+                    else "54310-54360"
+                )
+            ),
         }
 
         return result
@@ -811,18 +847,23 @@ Time: {result['timestamp'][:19]}"""
 
     def run_single_check(self):
         """Run a single check and return the result"""
-        # If no ticket range specified, use the default range 54310-54360
-        if not self.ticket_id_range:
+        # If no ticket configuration specified, use the default range 54310-54360
+        if not self.ticket_id_range and not self.specific_ticket_ids:
             self.ticket_id_range = (54310, 54360)
             self.logger.info(
                 "No ticket range specified, using default range: 54310-54360"
             )
 
-        if self.ticket_id_range:
-            # Check specific ticket ID range (notifications sent immediately per ticket)
-            self.logger.info(
-                f"Checking ticket ID range {self.ticket_id_range[0]}-{self.ticket_id_range[1]}..."
-            )
+        if self.ticket_id_range or self.specific_ticket_ids:
+            # Check specific ticket ID range or individual IDs (notifications sent immediately per ticket)
+            if self.specific_ticket_ids:
+                self.logger.info(
+                    f"Checking individual ticket IDs: {','.join(map(str, self.specific_ticket_ids))}"
+                )
+            else:
+                self.logger.info(
+                    f"Checking ticket ID range {self.ticket_id_range[0]}-{self.ticket_id_range[1]}..."
+                )
             result = self.check_ticket_range()
 
             self.logger.info(f"Status: {result['status']} - {result['message']}")
@@ -861,6 +902,10 @@ Time: {result['timestamp'][:19]}"""
         if self.ticket_id_range:
             self.logger.info(
                 f"Monitoring ticket range: {self.ticket_id_range[0]}-{self.ticket_id_range[1]}"
+            )
+        elif self.specific_ticket_ids:
+            self.logger.info(
+                f"Monitoring specific ticket IDs: {','.join(map(str, self.specific_ticket_ids))}"
             )
         else:
             self.logger.info("Will use default ticket range: 54310-54360")
@@ -1400,6 +1445,11 @@ def main():
         help="Check specific ticket ID range, format: start-end (e.g., 54296-54305)",
     )
     parser.add_argument(
+        "--ticket-ids",
+        type=str,
+        help="Check specific individual ticket IDs, comma-separated (e.g., 54302,54315,54328)",
+    )
+    parser.add_argument(
         "--check-ticket",
         type=int,
         help="Check a single specific ticket ID",
@@ -1422,6 +1472,8 @@ def main():
 
     # Parse ticket range if provided
     ticket_id_range = None
+    specific_ticket_ids = None
+
     if args.ticket_range:
         try:
             start_str, end_str = args.ticket_range.split("-")
@@ -1437,9 +1489,22 @@ def main():
                 "❌ Error: Invalid ticket range format. Use: start-end (e.g., 54296-54305)"
             )
             return
+    elif args.ticket_ids:
+        # Parse individual ticket IDs (comma-separated)
+        try:
+            specific_ticket_ids = [int(id.strip()) for id in args.ticket_ids.split(",")]
+            if not specific_ticket_ids:
+                print("❌ Error: No ticket IDs provided")
+                return
+            print(f"🎯 Will check individual ticket IDs: {args.ticket_ids}")
+        except ValueError:
+            print(
+                "❌ Error: Invalid ticket IDs format. Use comma-separated numbers (e.g., 54302,54315,54328)"
+            )
+            return
     elif args.check_ticket:
-        # Single ticket check - convert to range of 1
-        ticket_id_range = (args.check_ticket, args.check_ticket)
+        # Single ticket check - convert to specific IDs list
+        specific_ticket_ids = [args.check_ticket]
         print(f"🎯 Will check single ticket ID: {args.check_ticket}")
 
     checker = SportstimingTicketChecker(
@@ -1448,6 +1513,7 @@ def main():
         config_file=args.config,
         notify_all_statuses=args.notify_all,
         ticket_id_range=ticket_id_range,
+        specific_ticket_ids=specific_ticket_ids,
     )
 
     if args.test_telegram:

@@ -98,6 +98,39 @@ Check Main Page (https://www.sportstiming.dk/event/6583/resale)
 | `TICKET_RANGE` | ❌ | 54310-54360 | Range of ticket IDs to check |
 | `NOTIFY_ALL` | ❌ | false | Notify for all status changes |
 
+### 🎯 Flexible Ticket Configuration
+
+You can configure which tickets to monitor in several ways:
+
+**Option 1 - Range (recommended):**
+```bash
+TICKET_RANGE=54310-54360        # Check tickets 54310 through 54360
+```
+
+**Option 2 - Separate start/end:**
+```bash
+TICKET_START_ID=54310           # Starting ticket ID
+TICKET_END_ID=54360             # Ending ticket ID  
+```
+
+**Option 3 - Individual tickets:**
+```bash
+TICKET_IDS=54302,54315,54328,54341   # Check only these specific tickets
+```
+
+**Examples:**
+```bash
+# Check a small range
+TICKET_RANGE=54350-54370
+
+# Check specific scattered tickets
+TICKET_IDS=54302,54310,54325,54340,54355
+
+# Check using start/end (same as range)
+TICKET_START_ID=54300
+TICKET_END_ID=54400
+```
+
 ### Optional Notification Methods
 
 **Email:**
@@ -152,8 +185,14 @@ python ticket_checker.py --interval 120
 # Monitor custom range
 python ticket_checker.py --ticket-range 54300-54320 --interval 60
 
+# Monitor specific individual tickets
+python ticket_checker.py --ticket-ids 54302,54315,54328,54341 --interval 60
+
 # Check single ticket
 python ticket_checker.py --check-ticket 54302 --single
+
+# Check specific tickets once
+python ticket_checker.py --ticket-ids 54302,54315,54328 --single
 
 # Debug ticket content
 python ticket_checker.py --debug-ticket 54302
