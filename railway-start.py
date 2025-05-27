@@ -91,6 +91,7 @@ def main():
     print(f"   TICKET_START_ID: {os.getenv('TICKET_START_ID', 'NOT SET')}")
     print(f"   TICKET_END_ID: {os.getenv('TICKET_END_ID', 'NOT SET')}")
     print(f"   TICKET_IDS: {os.getenv('TICKET_IDS', 'NOT SET')}")
+    print(f"   AUTH_COOKIES: {'SET' if os.getenv('AUTH_COOKIES') else 'NOT SET'}")
 
     # Show first few characters of bot token if set (for debugging)
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -117,6 +118,34 @@ def main():
         json.dump(config, f, indent=2)
 
     print("✅ Config file created from environment variables")
+
+    # Handle authentication cookies if provided
+    auth_cookies = {}
+    if os.getenv("AUTH_COOKIES"):
+        try:
+            # Parse cookies from environment variable
+            # Format: "name1=value1; name2=value2; name3=value3"
+            cookie_string = os.getenv("AUTH_COOKIES")
+
+            # Remove "Cookie:" prefix if present
+            if cookie_string.startswith("Cookie:"):
+                cookie_string = cookie_string[7:].strip()
+
+            for cookie_pair in cookie_string.split(";"):
+                if "=" in cookie_pair:
+                    name, value = cookie_pair.strip().split("=", 1)
+                    if name.strip():  # Skip empty names
+                        auth_cookies[name.strip()] = value.strip()
+            print(f"✅ Parsed {len(auth_cookies)} authentication cookies")
+        except Exception as e:
+            print(f"⚠️  Warning: Failed to parse AUTH_COOKIES: {e}")
+            auth_cookies = {}
+
+    # Save cookies to a separate file for the ticket checker
+    if auth_cookies:
+        with open("auth_cookies.json", "w") as f:
+            json.dump(auth_cookies, f, indent=2)
+        print("✅ Authentication cookies saved")
 
     # Get configuration from environment
     check_interval = int(

@@ -28,6 +28,7 @@ class SportstimingTicketChecker:
         notify_all_statuses=False,
         ticket_id_range=None,
         specific_ticket_ids=None,
+        auth_cookies=None,
     ):
         """
         Initialize the ticket checker
@@ -39,6 +40,7 @@ class SportstimingTicketChecker:
             notify_all_statuses (bool): Send notifications for all statuses, not just when tickets are available
             ticket_id_range (tuple): Tuple of (start_id, end_id) for checking specific ticket IDs
             specific_ticket_ids (list): List of specific ticket IDs to check
+            auth_cookies (dict): Authentication cookies for accessing protected pages
         """
         self.event_url = event_url
         self.check_interval = check_interval
@@ -47,6 +49,7 @@ class SportstimingTicketChecker:
         self.notify_all_statuses = notify_all_statuses
         self.ticket_id_range = ticket_id_range
         self.specific_ticket_ids = specific_ticket_ids
+        self.auth_cookies = auth_cookies or {}
 
         # Set up logging
         logging.basicConfig(
@@ -61,28 +64,39 @@ class SportstimingTicketChecker:
         )
         self.logger = logging.getLogger(__name__)
 
-        # User agent to appear as a regular browser
+        # User agent to appear as a regular browser (matching user's browser)
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Language": "da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
             "Sec-Fetch-Dest": "document",
             "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-Site": "same-origin",
             "Sec-Fetch-User": "?1",
             "Cache-Control": "max-age=0",
             "DNT": "1",
-            "Sec-CH-UA": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            "Sec-CH-UA-Mobile": "?0",
-            "Sec-CH-UA-Platform": '"macOS"',
+            "sec-ch-ua": '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"macOS"',
+            "Referer": "https://www.sportstiming.dk/event/6583/resale",
         }
 
         # Create a session for better connection handling and cookie persistence
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+
+        # Add authentication cookies if provided
+        if self.auth_cookies:
+            self.session.cookies.update(self.auth_cookies)
+            self.logger.info(f"Added {len(self.auth_cookies)} authentication cookies")
+        else:
+            # Try to load cookies from file
+            loaded_cookies = self.load_auth_cookies()
+            if loaded_cookies:
+                self.session.cookies.update(loaded_cookies)
+                self.auth_cookies = loaded_cookies
 
         # Initialize session by visiting main page
         self._initialize_session()
@@ -107,6 +121,21 @@ class SportstimingTicketChecker:
         if self.config_file and os.path.exists(self.config_file):
             with open(self.config_file, "r") as f:
                 return json.load(f)
+        return {}
+
+    def load_auth_cookies(self, cookies_file=None):
+        """Load authentication cookies from JSON file"""
+        cookies_file = cookies_file or "auth_cookies.json"
+        if os.path.exists(cookies_file):
+            try:
+                with open(cookies_file, "r") as f:
+                    cookies = json.load(f)
+                self.logger.info(
+                    f"Loaded {len(cookies)} authentication cookies from {cookies_file}"
+                )
+                return cookies
+            except Exception as e:
+                self.logger.warning(f"Failed to load cookies from {cookies_file}: {e}")
         return {}
 
     def check_individual_ticket(self, ticket_id):
@@ -1560,6 +1589,16 @@ def main():
         type=int,
         help="Debug the content of a specific ticket ID to see what the page contains",
     )
+    parser.add_argument(
+        "--cookies-file",
+        type=str,
+        help="Path to JSON file containing authentication cookies",
+    )
+    parser.add_argument(
+        "--cookies",
+        type=str,
+        help="Authentication cookies as string (format: 'name1=value1; name2=value2')",
+    )
 
     args = parser.parse_args()
 
@@ -1608,6 +1647,22 @@ def main():
         specific_ticket_ids = [args.check_ticket]
         print(f"🎯 Will check single ticket ID: {args.check_ticket}")
 
+    # Parse authentication cookies if provided
+    auth_cookies = {}
+    if args.cookies:
+        try:
+            # Parse cookies from command line argument
+            for cookie_pair in args.cookies.split(";"):
+                if "=" in cookie_pair:
+                    name, value = cookie_pair.strip().split("=", 1)
+                    auth_cookies[name] = value
+            print(
+                f"🔐 Parsed {len(auth_cookies)} authentication cookies from command line"
+            )
+        except Exception as e:
+            print(f"❌ Error parsing cookies: {e}")
+            return
+
     checker = SportstimingTicketChecker(
         event_url=args.url,
         check_interval=args.interval,
@@ -1615,7 +1670,15 @@ def main():
         notify_all_statuses=args.notify_all,
         ticket_id_range=ticket_id_range,
         specific_ticket_ids=specific_ticket_ids,
+        auth_cookies=auth_cookies if auth_cookies else None,
     )
+
+    # Load cookies from file if specified and no cookies provided via command line
+    if args.cookies_file and not auth_cookies:
+        loaded_cookies = checker.load_auth_cookies(args.cookies_file)
+        if loaded_cookies:
+            checker.session.cookies.update(loaded_cookies)
+            checker.auth_cookies = loaded_cookies
 
     if args.test_telegram:
         checker.test_telegram_notification()
