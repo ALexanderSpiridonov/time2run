@@ -151,6 +151,10 @@ class SportstimingTicketChecker:
         base_url = "https://www.sportstiming.dk/event/6583/resale/ticket"
         ticket_url = f"{base_url}/{ticket_id}"
 
+        # Verbose logging for ticket check start
+        if hasattr(self, "verbose_mode") and self.verbose_mode:
+            self.logger.info(f"🔍 Checking ticket {ticket_id}: {ticket_url}")
+
         # Try multiple strategies to avoid 403 errors
         strategies = [
             {"timeout": 10, "delay": 0},  # First try - normal
@@ -161,49 +165,81 @@ class SportstimingTicketChecker:
         for attempt, strategy in enumerate(strategies, 1):
             try:
                 if strategy["delay"] > 0:
-                    self.logger.debug(
-                        f"Waiting {strategy['delay']} seconds before retry {attempt}"
-                    )
+                    if hasattr(self, "verbose_mode") and self.verbose_mode:
+                        self.logger.info(
+                            f"  ⏳ Waiting {strategy['delay']} seconds before retry {attempt} for ticket {ticket_id}"
+                        )
+                    else:
+                        self.logger.debug(
+                            f"Waiting {strategy['delay']} seconds before retry {attempt}"
+                        )
                     time.sleep(strategy["delay"])
 
+                if hasattr(self, "verbose_mode") and self.verbose_mode:
+                    self.logger.info(
+                        f"  🌐 Making request to ticket {ticket_id} (attempt {attempt}, timeout: {strategy['timeout']}s)"
+                    )
+
                 response = self.session.get(
-                    ticket_url,
-                    timeout=strategy["timeout"],
-                    allow_redirects=True,
+                    ticket_url, timeout=strategy["timeout"], allow_redirects=True
                 )
+
+                # Verbose logging for response
+                if hasattr(self, "verbose_mode") and self.verbose_mode:
+                    self.logger.info(
+                        f"  📡 Response for ticket {ticket_id}: Status {response.status_code}, Content-Length: {len(response.content)} bytes"
+                    )
 
                 # Handle 403 Forbidden specifically
                 if response.status_code == 403:
-                    self.logger.warning(
-                        f"403 Forbidden for ticket {ticket_id} (attempt {attempt})"
-                    )
+                    if hasattr(self, "verbose_mode") and self.verbose_mode:
+                        self.logger.warning(
+                            f"  🚫 403 Forbidden for ticket {ticket_id} (attempt {attempt})"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"403 Forbidden for ticket {ticket_id} (attempt {attempt})"
+                        )
                     if attempt < len(strategies):
                         continue  # Try next strategy
                     else:
                         # After all attempts, treat 403 as "not available"
-                        return {
+                        result = {
                             "timestamp": datetime.now().isoformat(),
                             "status": "NO_TICKETS",
                             "message": f"Ticket {ticket_id} access forbidden (likely not available or protected)",
                             "ticket_id": ticket_id,
                             "url": ticket_url,
                         }
+                        if hasattr(self, "verbose_mode") and self.verbose_mode:
+                            self.logger.info(
+                                f"  ❌ Final result for ticket {ticket_id}: {result['message']}"
+                            )
+                        return result
 
                 # Handle other HTTP errors
                 if response.status_code == 404:
-                    return {
+                    result = {
                         "timestamp": datetime.now().isoformat(),
                         "status": "NO_TICKETS",
                         "message": f"Ticket {ticket_id} not found (404)",
                         "ticket_id": ticket_id,
                         "url": ticket_url,
                     }
+                    if hasattr(self, "verbose_mode") and self.verbose_mode:
+                        self.logger.info(f"  ❌ Ticket {ticket_id} not found (404)")
+                    return result
 
                 response.raise_for_status()  # Raise for other HTTP errors
 
                 # Success - parse the content
                 soup = BeautifulSoup(response.content, "html.parser")
                 page_text = soup.get_text()
+
+                if hasattr(self, "verbose_mode") and self.verbose_mode:
+                    self.logger.info(
+                        f"  🔍 Analyzing content for ticket {ticket_id} ({len(page_text)} characters)"
+                    )
 
                 # The specific Danish message indicating ticket is not available
                 unavailable_message = "Det er p.t. ikke muligt at foretage dette valg, da alt enten er solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
@@ -242,9 +278,15 @@ class SportstimingTicketChecker:
                 ):
                     status = "NO_TICKETS"
                     message = f"Ticket {ticket_id} is sold or reserved"
+                    if hasattr(self, "verbose_mode") and self.verbose_mode:
+                        self.logger.info(
+                            f"  ❌ Ticket {ticket_id}: SOLD/RESERVED (found unavailable message)"
+                        )
                 elif is_expired:
                     status = "NO_TICKETS"
                     message = f"Ticket {ticket_id} is expired or cancelled"
+                    if hasattr(self, "verbose_mode") and self.verbose_mode:
+                        self.logger.info(f"  ❌ Ticket {ticket_id}: EXPIRED/CANCELLED")
                 elif (
                     len(page_text.strip()) < 2000
                 ):  # Very short pages are likely invalid/expired
@@ -252,6 +294,10 @@ class SportstimingTicketChecker:
                     message = (
                         f"Ticket {ticket_id} appears to be invalid (page too short)"
                     )
+                    if hasattr(self, "verbose_mode") and self.verbose_mode:
+                        self.logger.info(
+                            f"  ❌ Ticket {ticket_id}: INVALID (page too short: {len(page_text)} chars)"
+                        )
                 else:
                     # Look for the buy button "Køb" to confirm ticket is available
                     buy_button = soup.find(
@@ -273,10 +319,18 @@ class SportstimingTicketChecker:
                         message = (
                             f"🎫 Ticket {ticket_id} is AVAILABLE for purchase! Buy now!"
                         )
+                        if hasattr(self, "verbose_mode") and self.verbose_mode:
+                            self.logger.info(
+                                f"  ✅ Ticket {ticket_id}: AVAILABLE! (found buy button or price)"
+                            )
                     else:
                         # Might be available but unclear
                         status = "TICKETS_AVAILABLE"
                         message = f"🎫 Ticket {ticket_id} may be available (no unavailable message found)"
+                        if hasattr(self, "verbose_mode") and self.verbose_mode:
+                            self.logger.info(
+                                f"  ⚠️  Ticket {ticket_id}: POSSIBLY AVAILABLE (no clear unavailable message)"
+                            )
 
                 result = {
                     "timestamp": datetime.now().isoformat(),
@@ -1065,9 +1119,17 @@ Time: {result['timestamp'][:19]}"""
                             f"  📍 Ticket {ticket['ticket_id']}: {ticket['url']}"
                         )
                 else:
-                    self.logger.info(
-                        f"❌ No tickets available in range {self.ticket_id_range[0]}-{self.ticket_id_range[1]}"
-                    )
+                    # Handle both ticket range and specific ticket IDs
+                    if self.specific_ticket_ids:
+                        ticket_info = f"specific IDs: {','.join(map(str, self.specific_ticket_ids))}"
+                    elif self.ticket_id_range:
+                        ticket_info = (
+                            f"range {self.ticket_id_range[0]}-{self.ticket_id_range[1]}"
+                        )
+                    else:
+                        ticket_info = "default range 54310-54360"
+
+                    self.logger.info(f"❌ No tickets available in {ticket_info}")
 
                 # Only send summary notifications if notify_all_statuses is enabled AND status changed
                 if self.notify_all_statuses and last_status != result["status"]:
@@ -1522,8 +1584,8 @@ def main():
     parser.add_argument(
         "--interval",
         type=int,
-        default=120,
-        help="Check interval in seconds (default: 120)",
+        default=10,
+        help="Check interval in seconds (default: 10)",
     )
     parser.add_argument("--config", help="Path to config file for notifications")
     parser.add_argument(
@@ -1563,6 +1625,11 @@ def main():
         "--debug",
         action="store_true",
         help="Enable debug logging for detailed output",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable verbose logging to show detailed status for each individual ticket",
     )
     parser.add_argument(
         "--notify-all",
@@ -1672,6 +1739,11 @@ def main():
         specific_ticket_ids=specific_ticket_ids,
         auth_cookies=auth_cookies if auth_cookies else None,
     )
+
+    # Set verbose mode if requested
+    if args.verbose:
+        checker.verbose_mode = True
+        print("🔍 Verbose mode enabled - showing detailed status for each ticket")
 
     # Load cookies from file if specified and no cookies provided via command line
     if args.cookies_file and not auth_cookies:
