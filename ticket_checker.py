@@ -16,11 +16,17 @@ import argparse
 import json
 import os
 import sys
+import random
 
 
 class SportstimingTicketChecker:
     def __init__(
-        self, event_url, check_interval=300, config_file=None, notify_all_statuses=False
+        self,
+        event_url,
+        check_interval=300,
+        config_file=None,
+        notify_all_statuses=False,
+        dry_run=False,
     ):
         """
         Initialize the ticket checker
@@ -30,12 +36,14 @@ class SportstimingTicketChecker:
             check_interval (int): Time between checks in seconds (default: 5 minutes)
             config_file (str): Path to config file for notifications
             notify_all_statuses (bool): Send notifications for all statuses, not just when tickets are available
+            dry_run (bool): Run without sending actual notifications (for testing)
         """
         self.event_url = event_url
         self.check_interval = check_interval
         self.config_file = config_file
         self.config = self.load_config() if config_file else {}
         self.notify_all_statuses = notify_all_statuses
+        self.dry_run = dry_run
 
         # Set up logging
         logging.basicConfig(
@@ -124,32 +132,109 @@ class SportstimingTicketChecker:
         Returns:
             dict: Dictionary with status and details
         """
+        max_retries = 3
+        base_delay = 30  # Start with 30 seconds for 429 errors
+
+        for attempt in range(max_retries + 1):
+            try:
+                # Create a session to maintain cookies
+                session = requests.Session()
+                session.headers.update(self.headers)
+
+                response = session.get(self.event_url, timeout=30)
+
+                # Handle 429 (Too Many Requests) specifically
+                if response.status_code == 429:
+                    if attempt < max_retries:
+                        delay = base_delay * (
+                            2**attempt
+                        )  # Exponential backoff: 30s, 60s, 120s
+                        self.logger.warning(
+                            f"Rate limited (429). Waiting {delay} seconds before retry {attempt + 1}/{max_retries}"
+                        )
+                        time.sleep(delay)
+                        continue
+                    else:
+                        self.logger.error("Rate limited (429) - max retries exceeded")
+                        return {
+                            "timestamp": datetime.now().isoformat(),
+                            "status": "RATE_LIMITED",
+                            "message": "Rate limited by server (429). Try increasing check interval or wait longer.",
+                            "ticket_count": 0,
+                            "url": self.event_url,
+                        }
+
+                # Handle 403 specifically
+                if response.status_code == 403:
+                    self.logger.warning(
+                        "Received 403 Forbidden - authentication may be required"
+                    )
+                    return {
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "AUTH_REQUIRED",
+                        "message": "Authentication required (403 Forbidden). Please update cookies with --update-cookies command.",
+                        "ticket_count": 0,
+                        "url": self.event_url,
+                    }
+
+                response.raise_for_status()
+                break  # Success, exit retry loop
+
+            except requests.RequestException as e:
+                if "429" in str(e) and attempt < max_retries:
+                    delay = base_delay * (2**attempt)
+                    self.logger.warning(
+                        f"Rate limited in exception. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}"
+                    )
+                    time.sleep(delay)
+                    continue
+                elif attempt < max_retries and "timeout" in str(e).lower():
+                    delay = 10 * (attempt + 1)  # 10s, 20s, 30s for timeouts
+                    self.logger.warning(
+                        f"Request timeout. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}"
+                    )
+                    time.sleep(delay)
+                    continue
+                else:
+                    error_msg = f"Failed to fetch page: {e}"
+                    if "403" in str(e):
+                        error_msg += (
+                            " - Authentication required. Please update cookies."
+                        )
+                    elif "429" in str(e):
+                        error_msg += " - Rate limited. Increase check interval."
+                    self.logger.error(f"Request failed: {e}")
+                    return {
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "ERROR",
+                        "message": error_msg,
+                        "ticket_count": 0,
+                        "url": self.event_url,
+                    }
+            except Exception as e:
+                if attempt < max_retries:
+                    delay = 10 * (attempt + 1)
+                    self.logger.warning(
+                        f"Unexpected error. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}"
+                    )
+                    time.sleep(delay)
+                    continue
+                else:
+                    self.logger.error(f"Unexpected error: {e}")
+                    return {
+                        "timestamp": datetime.now().isoformat(),
+                        "status": "ERROR",
+                        "message": f"Unexpected error: {e}",
+                        "ticket_count": 0,
+                        "url": self.event_url,
+                    }
+
+        # If we get here, the request was successful
         try:
-            # Create a session to maintain cookies
-            session = requests.Session()
-            session.headers.update(self.headers)
-
-            response = session.get(self.event_url, timeout=30)
-
-            # Handle 403 specifically
-            if response.status_code == 403:
-                self.logger.warning(
-                    "Received 403 Forbidden - authentication may be required"
-                )
-                return {
-                    "timestamp": datetime.now().isoformat(),
-                    "status": "AUTH_REQUIRED",
-                    "message": "Authentication required (403 Forbidden). Please update cookies with --update-cookies command.",
-                    "ticket_count": 0,
-                    "url": self.event_url,
-                }
-
-            response.raise_for_status()
-
             soup = BeautifulSoup(response.content, "html.parser")
 
             # Look for the specific "sold out/reserved" message in Danish
-            sold_out_message = "solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
+            # sold_out_message = "solgt eller reserveret. Hvis en anden kunde afbryder sit køb, kan reservationen muligvis frigives igen."
 
             # Also check for the general "no tickets" message
             no_tickets_text = "Der findes ingen billetter til salg"
@@ -158,27 +243,23 @@ class SportstimingTicketChecker:
             page_text = soup.get_text()
 
             # Check if tickets are sold out/reserved
-            if sold_out_message in page_text:
-                status = "NO_TICKETS"
-                message = "All tickets are sold or reserved"
-            elif no_tickets_text or no_tickets_text_en in page_text:
+            # if sold_out_message in page_text:
+            #     status = "NO_TICKETS"
+            #     message = "All tickets are sold or reserved"
+            if no_tickets_text in page_text:
                 status = "NO_TICKETS"
                 message = "No tickets available for sale"
-
-            # if no_tickets_text in page_text:
-            #     status = "NO_TICKETS"
-            #     message = "No tickets available for sale"
             else:
                 # If neither "sold out" message is present, tickets might be available
                 # Look for ticket listings or sale sections to confirm
                 ticket_sections = soup.find_all(
                     ["div", "section"],
-                    text=lambda text: text and "billet" in text.lower(),
+                    string=lambda text: text and "billet" in text.lower(),
                 )
 
                 # Look for price indicators (DKK, kr, etc.)
                 price_indicators = soup.find_all(
-                    text=lambda text: text
+                    string=lambda text: text
                     and ("kr" in text.lower() or "dkk" in text.lower())
                 )
 
@@ -204,24 +285,12 @@ class SportstimingTicketChecker:
 
             return result
 
-        except requests.RequestException as e:
-            error_msg = f"Failed to fetch page: {e}"
-            if "403" in str(e):
-                error_msg += " - Authentication required. Please update cookies."
-            self.logger.error(f"Request failed: {e}")
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "status": "ERROR",
-                "message": error_msg,
-                "ticket_count": 0,
-                "url": self.event_url,
-            }
         except Exception as e:
-            self.logger.error(f"Unexpected error: {e}")
+            self.logger.error(f"Error parsing response: {e}")
             return {
                 "timestamp": datetime.now().isoformat(),
                 "status": "ERROR",
-                "message": f"Unexpected error: {e}",
+                "message": f"Error parsing response: {e}",
                 "ticket_count": 0,
                 "url": self.event_url,
             }
@@ -615,19 +684,32 @@ Time: {result['timestamp'][:19]}"""
         except Exception as e:
             self.logger.error(f"Failed to send Pushover notification: {e}")
 
-    def send_notifications(self, result, force=False):
+    def send_notifications(self, result, force=False, dry_run=False):
         """
         Send all configured notifications
 
         Args:
             result (dict): Result from ticket check
             force (bool): Force sending notifications regardless of status
+            dry_run (bool): Log what would be sent without actually sending
         """
         should_send = (
             force or result["status"] == "TICKETS_AVAILABLE" or self.notify_all_statuses
         )
 
         if should_send:
+            if dry_run:
+                self.logger.info("🧪 DRY RUN - Would send notifications:")
+                if self.config.get("email"):
+                    self.logger.info("   📧 Email notification (configured)")
+                if self.config.get("sms"):
+                    self.logger.info("   📱 SMS notification (configured)")
+                if self.config.get("telegram"):
+                    self.logger.info("   💬 Telegram notification (configured)")
+                if self.config.get("pushover"):
+                    self.logger.info("   📲 Pushover notification (configured)")
+                return
+
             # Send email if configured
             self.send_email_notification(result)
 
@@ -640,9 +722,14 @@ Time: {result['timestamp'][:19]}"""
             # Send Pushover if configured
             self.send_pushover_notification(result)
         else:
-            self.logger.debug(
-                f"Not sending notifications for status: {result['status']}"
-            )
+            if dry_run:
+                self.logger.debug(
+                    f"🧪 DRY RUN - No notifications would be sent for status: {result['status']}"
+                )
+            else:
+                self.logger.debug(
+                    f"Not sending notifications for status: {result['status']}"
+                )
 
     def run_single_check(self):
         """Run a single check and return the result"""
@@ -655,10 +742,8 @@ Time: {result['timestamp'][:19]}"""
                 f"Found {result['ticket_count']} potential ticket listings"
             )
 
-        # Send notifications if tickets are available
-        if result["status"] == "TICKETS_AVAILABLE":
-            self.send_notifications(result)
-
+        # Note: Notifications are handled by the calling method (run_continuous_monitoring)
+        # Only send notifications here if explicitly called from command line with --single
         return result
 
     def run_continuous_monitoring(self):
@@ -673,49 +758,106 @@ Time: {result['timestamp'][:19]}"""
         else:
             self.logger.info("📢 Notifications only for TICKETS_AVAILABLE status")
 
+        if self.dry_run:
+            self.logger.info(
+                "🧪 DRY RUN MODE - Notifications will be logged but not actually sent"
+            )
+
+        # Add rate limiting protection
+        if self.check_interval < 60:
+            self.logger.warning(
+                f"⚠️  Check interval ({self.check_interval}s) is quite frequent. Consider using 60s+ to avoid rate limiting."
+            )
+
         last_status = None
+        consecutive_same_status = 0  # Track how many times we've seen the same status
 
         try:
             while True:
                 result = self.run_single_check()
+                current_status = result["status"]
 
-                # Send notifications based on configuration
+                # Track consecutive status occurrences
+                if current_status == last_status:
+                    consecutive_same_status += 1
+                else:
+                    consecutive_same_status = 1
+
+                # Handle rate limiting
+                if current_status == "RATE_LIMITED":
+                    self.logger.warning(
+                        "🚨 Rate limited! Increasing delay to avoid further rate limiting..."
+                    )
+                    # Temporarily increase interval for rate limited responses
+                    extended_delay = max(
+                        self.check_interval * 2, 300
+                    )  # At least 5 minutes
+                    self.logger.info(
+                        f"Using extended delay of {extended_delay} seconds due to rate limiting"
+                    )
+
+                    # Add random component to avoid synchronized requests
+                    jitter = random.randint(30, 120)  # 30-120 second random delay
+                    total_delay = extended_delay + jitter
+
+                    self.logger.info(
+                        f"Next check in {total_delay} seconds (extended + {jitter}s jitter)"
+                    )
+                    time.sleep(total_delay)
+                    continue
+
+                # Determine if we should send a notification
+                should_send_notification = False
+                notification_reason = ""
+
                 if self.notify_all_statuses:
-                    # Send notification only when status changes
-                    if last_status != result["status"]:
-                        self.send_notifications(result)
-                        self.logger.info(
-                            f"Status changed: {last_status} → {result['status']}"
+                    # Send notification only when status changes (not for repeated same status)
+                    if current_status != last_status:
+                        should_send_notification = True
+                        notification_reason = (
+                            f"Status changed: {last_status} → {current_status}"
                         )
                     else:
-                        self.logger.debug(f"Status unchanged: {result['status']}")
+                        self.logger.debug(
+                            f"Status unchanged: {current_status} (seen {consecutive_same_status} times)"
+                        )
                 else:
-                    # Only send notification when status changes to tickets available
-                    # OR when tickets become unavailable after being available (to inform about status change)
+                    # Simple logic: Only notify for TICKETS_AVAILABLE if previous status was NOT TICKETS_AVAILABLE
                     if (
-                        result["status"] == "TICKETS_AVAILABLE"
+                        current_status == "TICKETS_AVAILABLE"
                         and last_status != "TICKETS_AVAILABLE"
                     ):
-                        self.send_notifications(result)
-                        self.logger.info(
+                        should_send_notification = True
+                        notification_reason = (
                             f"🎫 Tickets became available! (was: {last_status})"
                         )
-                    elif (
-                        last_status == "TICKETS_AVAILABLE"
-                        and result["status"] != "TICKETS_AVAILABLE"
-                    ):
-                        # Optional: notify when tickets are no longer available
-                        # You can comment this out if you don't want these notifications
-                        self.logger.info(
-                            f"⚠️ Tickets no longer available: {last_status} → {result['status']}"
-                        )
                     else:
-                        self.logger.debug(f"No notification needed: {result['status']}")
+                        self.logger.debug(
+                            f"No notification needed: {current_status} (previous: {last_status})"
+                        )
 
-                last_status = result["status"]
+                # Send notification if needed
+                if should_send_notification:
+                    self.logger.info(notification_reason)
+                    self.send_notifications(result, dry_run=self.dry_run)
+                    notification_type = "DRY RUN" if self.dry_run else "ACTUAL"
+                    self.logger.info(
+                        f"📤 {notification_type} notification sent for status: {current_status}"
+                    )
+                else:
+                    self.logger.debug(
+                        f"🔇 No notification sent - status: {current_status} (consecutive: {consecutive_same_status})"
+                    )
 
-                self.logger.info(f"Next check in {self.check_interval} seconds...")
-                time.sleep(self.check_interval)
+                last_status = current_status
+
+                # Add some jitter to prevent synchronized requests
+                base_interval = self.check_interval
+                jitter = random.randint(-30, 30)  # ±30 seconds random variation
+                actual_interval = max(base_interval + jitter, 30)  # Minimum 30 seconds
+
+                self.logger.info(f"Next check in {actual_interval} seconds...")
+                time.sleep(actual_interval)
 
         except KeyboardInterrupt:
             self.logger.info("Monitoring stopped by user")
@@ -1046,8 +1188,8 @@ def main():
     parser.add_argument(
         "--interval",
         type=int,
-        default=120,
-        help="Check interval in seconds (default: 120)",
+        default=300,
+        help="Check interval in seconds (default: 300, minimum recommended: 60 to avoid rate limiting)",
     )
     parser.add_argument("--config", help="Path to config file for notifications")
     parser.add_argument(
@@ -1111,6 +1253,11 @@ def main():
         action="store_true",
         help="Show current environment variables for authentication",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run monitoring without sending actual notifications (for testing)",
+    )
 
     args = parser.parse_args()
 
@@ -1157,6 +1304,7 @@ def main():
         check_interval=args.interval,
         config_file=args.config,
         notify_all_statuses=args.notify_all,
+        dry_run=args.dry_run,
     )
 
     # Handle cookie updates
@@ -1171,6 +1319,9 @@ def main():
         ):
             print("Running single check to test authentication...")
             result = checker.run_single_check()
+            # Send notifications for single checks if tickets are available
+            if result["status"] == "TICKETS_AVAILABLE":
+                checker.send_notifications(result, dry_run=checker.dry_run)
             print(json.dumps(result, indent=2))
             return
 
@@ -1212,6 +1363,9 @@ def main():
             print("✅ Cookies updated successfully")
             print("Running test check...")
             result = checker.run_single_check()
+            # Send notifications for single checks if tickets are available
+            if result["status"] == "TICKETS_AVAILABLE":
+                checker.send_notifications(result, dry_run=checker.dry_run)
             print(json.dumps(result, indent=2))
         else:
             print("❌ No cookies provided")
@@ -1262,6 +1416,9 @@ def main():
 
     if args.single:
         result = checker.run_single_check()
+        # Send notifications for single checks if tickets are available
+        if result["status"] == "TICKETS_AVAILABLE":
+            checker.send_notifications(result, dry_run=checker.dry_run)
         print(json.dumps(result, indent=2))
     else:
         checker.run_continuous_monitoring()
