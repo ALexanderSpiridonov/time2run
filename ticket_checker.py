@@ -50,9 +50,22 @@ class SportstimingTicketChecker:
         )
         self.logger = logging.getLogger(__name__)
 
-        # User agent to appear as a regular browser
+        # Enhanced headers to match browser request and bypass 403 errors
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "sec-ch-ua": '"Chromium";v="136", "Google Chrome";v="136", "Not.A/Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"macOS"',
+            # Session cookies - you may need to update these periodically
+            "Cookie": "cookies_allowed=required; st-lang=da-DK",
         }
 
     def load_config(self):
@@ -62,6 +75,25 @@ class SportstimingTicketChecker:
                 return json.load(f)
         return {}
 
+    def update_cookies(self, auth_token=None, session_id=None):
+        """
+        Update cookies for authentication
+
+        Args:
+            auth_token (str): The st-auth-s2 JWT token from browser
+            session_id (str): The st-sessionids2 session ID from browser
+        """
+        base_cookies = "cookies_allowed=required; st-lang=da-DK"
+
+        if session_id:
+            base_cookies += f"; st-sessionids2={session_id}"
+
+        if auth_token:
+            base_cookies += f"; st-auth-s2={auth_token}"
+
+        self.headers["Cookie"] = base_cookies
+        self.logger.info("Updated authentication cookies")
+
     def check_tickets_available(self):
         """
         Check if tickets are available for sale
@@ -70,7 +102,25 @@ class SportstimingTicketChecker:
             dict: Dictionary with status and details
         """
         try:
-            response = requests.get(self.event_url, headers=self.headers, timeout=30)
+            # Create a session to maintain cookies
+            session = requests.Session()
+            session.headers.update(self.headers)
+
+            response = session.get(self.event_url, timeout=30)
+
+            # Handle 403 specifically
+            if response.status_code == 403:
+                self.logger.warning(
+                    "Received 403 Forbidden - authentication may be required"
+                )
+                return {
+                    "timestamp": datetime.now().isoformat(),
+                    "status": "AUTH_REQUIRED",
+                    "message": "Authentication required (403 Forbidden). Please update cookies with --update-cookies command.",
+                    "ticket_count": 0,
+                    "url": self.event_url,
+                }
+
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, "html.parser")
@@ -132,11 +182,14 @@ class SportstimingTicketChecker:
             return result
 
         except requests.RequestException as e:
+            error_msg = f"Failed to fetch page: {e}"
+            if "403" in str(e):
+                error_msg += " - Authentication required. Please update cookies."
             self.logger.error(f"Request failed: {e}")
             return {
                 "timestamp": datetime.now().isoformat(),
                 "status": "ERROR",
-                "message": f"Failed to fetch page: {e}",
+                "message": error_msg,
                 "ticket_count": 0,
                 "url": self.event_url,
             }
@@ -1017,6 +1070,19 @@ def main():
         action="store_true",
         help="Send notifications for all statuses, not just when tickets are available",
     )
+    parser.add_argument(
+        "--update-cookies",
+        action="store_true",
+        help="Update cookies for authentication (interactive)",
+    )
+    parser.add_argument(
+        "--auth-token",
+        help="Set the st-auth-s2 authentication token",
+    )
+    parser.add_argument(
+        "--session-id",
+        help="Set the st-sessionids2 session ID",
+    )
 
     args = parser.parse_args()
 
@@ -1034,6 +1100,51 @@ def main():
         config_file=args.config,
         notify_all_statuses=args.notify_all,
     )
+
+    # Handle cookie updates
+    if args.auth_token or args.session_id:
+        checker.update_cookies(auth_token=args.auth_token, session_id=args.session_id)
+        print("✅ Cookies updated successfully")
+        if (
+            not args.single
+            and not args.find_chat_ids
+            and not args.troubleshoot_telegram
+        ):
+            print("Running single check to test authentication...")
+            result = checker.run_single_check()
+            print(json.dumps(result, indent=2))
+            return
+
+    if args.update_cookies:
+        print("🔐 Interactive Cookie Update")
+        print("=" * 30)
+        print("To get these values from your browser:")
+        print("1. Go to https://www.sportstiming.dk/event/6583/resale")
+        print("2. Open Developer Tools (F12)")
+        print("3. Go to Network tab")
+        print("4. Refresh the page")
+        print("5. Click on the first request to the page")
+        print("6. Look for 'Cookie' in the Request Headers")
+        print("7. Copy the values for st-auth-s2 and st-sessionids2")
+        print()
+
+        auth_token = input("Enter st-auth-s2 token (or press Enter to skip): ").strip()
+        session_id = input(
+            "Enter st-sessionids2 session ID (or press Enter to skip): "
+        ).strip()
+
+        if auth_token or session_id:
+            checker.update_cookies(
+                auth_token=auth_token if auth_token else None,
+                session_id=session_id if session_id else None,
+            )
+            print("✅ Cookies updated successfully")
+            print("Running test check...")
+            result = checker.run_single_check()
+            print(json.dumps(result, indent=2))
+        else:
+            print("❌ No cookies provided")
+        return
 
     if args.test_telegram:
         checker.test_telegram_notification()
