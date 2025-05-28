@@ -68,6 +68,29 @@ class SportstimingTicketChecker:
             "Cookie": "cookies_allowed=required; st-lang=da-DK",
         }
 
+        # Automatically load authentication from environment variables
+        self.load_auth_from_env()
+
+    def load_auth_from_env(self):
+        """
+        Load authentication tokens from environment variables
+        Environment variables:
+        - ST_AUTH_TOKEN: The st-auth-s2 JWT token
+        - ST_SESSION_ID: The st-sessionids2 session ID
+        """
+        auth_token = os.getenv("ST_AUTH_TOKEN")
+        session_id = os.getenv("ST_SESSION_ID")
+
+        if auth_token or session_id:
+            self.update_cookies(auth_token=auth_token, session_id=session_id)
+            self.logger.info("Loaded authentication from environment variables")
+            if auth_token:
+                self.logger.info("✅ Auth token loaded from ST_AUTH_TOKEN")
+            if session_id:
+                self.logger.info("✅ Session ID loaded from ST_SESSION_ID")
+        else:
+            self.logger.debug("No authentication environment variables found")
+
     def load_config(self):
         """Load configuration from JSON file"""
         if self.config_file and os.path.exists(self.config_file):
@@ -1083,11 +1106,46 @@ def main():
         "--session-id",
         help="Set the st-sessionids2 session ID",
     )
+    parser.add_argument(
+        "--show-env",
+        action="store_true",
+        help="Show current environment variables for authentication",
+    )
 
     args = parser.parse_args()
 
     if args.create_config:
         create_sample_config()
+        return
+
+    if args.show_env:
+        print("🔍 Environment Variables Status")
+        print("=" * 35)
+
+        auth_token = os.getenv("ST_AUTH_TOKEN")
+        session_id = os.getenv("ST_SESSION_ID")
+
+        if auth_token:
+            print(f"✅ ST_AUTH_TOKEN: {auth_token[:30]}...")
+            print(f"   Length: {len(auth_token)} characters")
+        else:
+            print("❌ ST_AUTH_TOKEN: Not set")
+
+        if session_id:
+            print(f"✅ ST_SESSION_ID: {session_id}")
+        else:
+            print("❌ ST_SESSION_ID: Not set")
+
+        if not auth_token and not session_id:
+            print("\n💡 To set environment variables:")
+            print("   export ST_AUTH_TOKEN='your_token_here'")
+            print("   export ST_SESSION_ID='your_session_id_here'")
+            print("\n📖 See RAILWAY_SETUP.md for detailed instructions")
+        else:
+            print(
+                f"\n🎯 Authentication: {'✅ Ready' if (auth_token and session_id) else '⚠️ Partial'}"
+            )
+
         return
 
     # Set debug logging if requested
@@ -1103,8 +1161,9 @@ def main():
 
     # Handle cookie updates
     if args.auth_token or args.session_id:
+        # Command-line arguments override environment variables
         checker.update_cookies(auth_token=args.auth_token, session_id=args.session_id)
-        print("✅ Cookies updated successfully")
+        print("✅ Cookies updated from command line arguments")
         if (
             not args.single
             and not args.find_chat_ids
@@ -1114,6 +1173,18 @@ def main():
             result = checker.run_single_check()
             print(json.dumps(result, indent=2))
             return
+
+    # Check if environment variables are set
+    env_auth_token = os.getenv("ST_AUTH_TOKEN")
+    env_session_id = os.getenv("ST_SESSION_ID")
+
+    if env_auth_token or env_session_id:
+        print("🔐 Using authentication from environment variables:")
+        if env_auth_token:
+            print(f"   ✅ ST_AUTH_TOKEN: {env_auth_token[:20]}...")
+        if env_session_id:
+            print(f"   ✅ ST_SESSION_ID: {env_session_id}")
+        print()
 
     if args.update_cookies:
         print("🔐 Interactive Cookie Update")
